@@ -169,14 +169,15 @@ Expy Kit lives in the Ultimate tab (always listed; most operators want Pose Mode
 - `ParamLabels.csv` lives outside the addon so updates do not wipe custom hashes (`%APPDATA%/Smash Ultimate Labels` on Windows)
 - **Append New Hashes** adds lowercase bone names, `bonecol` collision names, and child mesh names in a responsive batch; additional CSV destinations are configurable in the add-on preferences
 
-### Panel Presets and panel order
+### Panel Presets
 
-Two independent controls over the Ultimate tab itself.
+**Panel Presets** at the bottom of the Ultimate tab controls the whole layout of the tab: which panels are visible *and* what order they appear in.
 
-- **Panel Presets** (bottom of the Ultimate tab) decides which panels are *visible*. **All Panels**, **Animate**, and **Modeling** ship built in; add, duplicate, rename, and delete your own, tick panels on and off, and **Save Presets** writes them to your Blender config so other `.blend` files pick them up. The checklist applies immediately
-- The add-on preferences contain a persistent **Ultimate Sidebar Panel Order** list, which decides the *order*. Select a panel and move it with the up/down arrows; the chosen order is restored when the add-on loads in later Blender sessions
-
-The two work together: ordering never moves the Panel Presets panel itself, which stays pinned at the bottom.
+- **All Panels**, **Animate**, and **Modeling** ship built in; add, duplicate, rename, and delete your own
+- The panel list is a single checklist: tick a panel to show it, and use the up/down arrows beside the list to move it. The reset arrow restores the add-on's default order for that preset
+- Each preset carries its own order, so switching presets relays out the tab
+- **Save Presets** writes them to your Blender config so other `.blend` files pick them up; presets also travel inside a saved `.blend`
+- Changes apply immediately. Panel Presets itself is never hidden or moved — it stays pinned at the bottom so a bad preset is always undoable
 
 ### Helper bones (`BL_*`)
 
@@ -208,7 +209,7 @@ Tutorials for the shared import/export flow are on the [wiki](https://github.com
 
 ## System requirements
 
-64-bit **Blender 4.0** and **Blender 5.x** on Windows, Linux, and macOS (including Apple Silicon). Smash Viewport needs a working DX12 / Vulkan / Metal GPU stack on those platforms.
+64-bit **Blender 4.4+** and **Blender 5.x** on Windows, Linux, and macOS (including Apple Silicon). Smash Viewport needs a working DX12 / Vulkan / Metal GPU stack on those platforms.
 
 If Blender runs but the addon will not enable, open an issue on [this fork](https://github.com/CrusherD2/smash-ultimate-blender/issues).
 

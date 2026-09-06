@@ -334,8 +334,6 @@ classes = [
     source.extras.create_ik_armsandlegs.SUB_OP_create_ik_bones_operator,
     source.extras.create_ik_legs.SUB_OP_create_foot_ik_operator,
     source.extras.ik_fk_switch.SUB_OP_simple_ik_control,
-    source.extras.apply_ik_animation.SUB_OP_apply_ik_animation_operator,
-    source.extras.ik_influence_toggle.SUB_OP_toggle_ik_influence,
     source.extras.set_linear_vertex_color.SUB_OP_LinearColorSet,
     blender_property_extensions.IdlePoseItem,
     blender_property_extensions.UserPoseItem,

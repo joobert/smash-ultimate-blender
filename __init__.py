@@ -86,15 +86,10 @@ def register():
     from .source import retargeting
     retargeting.register()
 
-    # Panel presets before the ordering pass: registering them adds the Panel
-    # Presets panel and repairs parent/child hierarchies, and panel_order needs
-    # that settled before it decides which panels are top-level.
+    # Last, once every panel exists: Panel Presets owns both sidebar visibility
+    # and sidebar order, and its registration applies the saved layout.
     from .source.extras import panel_presets
     panel_presets.register()
-
-    # Apply the user-defined Ultimate tab order only after every panel exists.
-    from .source.panel_order import apply_saved_order
-    apply_saved_order()
 
     print('Loaded Smash Ultimate Blender Tools!')
 

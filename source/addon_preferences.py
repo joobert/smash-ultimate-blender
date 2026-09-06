@@ -1,6 +1,6 @@
 import bpy
-from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
-from bpy.types import AddonPreferences, Operator, PropertyGroup, UIList
+from bpy.props import BoolProperty, CollectionProperty, IntProperty, StringProperty
+from bpy.types import AddonPreferences, PropertyGroup
 
 
 ADDON_MODULE_NAME = (__package__ or "").split(".")[0]
@@ -14,58 +14,6 @@ class SUB_PG_param_labels_path(PropertyGroup):
         default="",
         subtype="FILE_PATH",
     )
-
-
-class SUB_PG_ultimate_panel_order_item(PropertyGroup):
-    panel_id: StringProperty(options={'HIDDEN'})
-
-
-class SUB_UL_ultimate_panel_order(UIList):
-    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
-        layout.label(text=item.name, icon='PREFERENCES')
-
-
-class SUB_OP_move_ultimate_panel(Operator):
-    bl_idname = "sub.move_ultimate_panel"
-    bl_label = "Move Ultimate Panel"
-    bl_description = "Move the selected panel in the persistent Ultimate sidebar order"
-    bl_options = {'INTERNAL'}
-
-    direction: EnumProperty(
-        items=(('UP', "Up", "Move the panel up"), ('DOWN', "Down", "Move the panel down")),
-        options={'HIDDEN'},
-    )
-
-    def execute(self, context):
-        preferences = get_addon_preferences(context)
-        if preferences is None:
-            return {'CANCELLED'}
-        from .panel_order import apply_saved_order, sync_preferences
-
-        sync_preferences(preferences)
-        index = preferences.ultimate_panel_order_index
-        target = index - 1 if self.direction == 'UP' else index + 1
-        if target < 0 or target >= len(preferences.ultimate_panel_order):
-            return {'CANCELLED'}
-        preferences.ultimate_panel_order.move(index, target)
-        preferences.ultimate_panel_order_index = target
-        apply_saved_order(preferences)
-        return {'FINISHED'}
-
-
-class SUB_OP_reset_ultimate_panel_order(Operator):
-    bl_idname = "sub.reset_ultimate_panel_order"
-    bl_label = "Reset Ultimate Panel Order"
-    bl_description = "Restore the add-on's default Ultimate sidebar panel order"
-
-    def execute(self, context):
-        preferences = get_addon_preferences(context)
-        if preferences is None:
-            return {'CANCELLED'}
-        from .panel_order import reset_to_default
-
-        reset_to_default(preferences)
-        return {'FINISHED'}
 
 
 class SUB_AddonPreferences(AddonPreferences):
@@ -102,9 +50,6 @@ class SUB_AddonPreferences(AddonPreferences):
         subtype="DIR_PATH",
     )
 
-    ultimate_panel_order: CollectionProperty(type=SUB_PG_ultimate_panel_order_item)
-    ultimate_panel_order_index: IntProperty(default=0)
-
     def draw(self, _context):
         layout = self.layout
 
@@ -127,28 +72,11 @@ class SUB_AddonPreferences(AddonPreferences):
         box.prop(self, "collection_preset_directory")
 
         box = layout.box()
-        box.label(text="Ultimate Sidebar Panel Order")
-        box.label(text="Select a panel and use the arrows. The order is saved in preferences.", icon='INFO')
-        from .panel_order import sync_preferences
-
-        sync_preferences(self)
-        row = box.row()
-        row.template_list(
-            "SUB_UL_ultimate_panel_order",
-            "",
-            self,
-            "ultimate_panel_order",
-            self,
-            "ultimate_panel_order_index",
-            rows=8,
+        box.label(text="Ultimate Sidebar Layout")
+        box.label(
+            text="Panel visibility and order live in the Panel Presets panel at the bottom of the Ultimate tab.",
+            icon='INFO',
         )
-        controls = row.column(align=True)
-        op = controls.operator("sub.move_ultimate_panel", text="", icon='TRIA_UP')
-        op.direction = 'UP'
-        op = controls.operator("sub.move_ultimate_panel", text="", icon='TRIA_DOWN')
-        op.direction = 'DOWN'
-        controls.separator()
-        controls.operator("sub.reset_ultimate_panel_order", text="", icon='LOOP_BACK')
 
         box = layout.box()
         box.label(text="Additional ParamLabels Files")
@@ -163,10 +91,6 @@ class SUB_AddonPreferences(AddonPreferences):
 
 CLASSES = (
     SUB_PG_param_labels_path,
-    SUB_PG_ultimate_panel_order_item,
-    SUB_UL_ultimate_panel_order,
-    SUB_OP_move_ultimate_panel,
-    SUB_OP_reset_ultimate_panel_order,
     SUB_AddonPreferences,
 )
 

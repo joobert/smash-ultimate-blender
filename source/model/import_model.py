@@ -886,20 +886,24 @@ def get_index_from_name(name, bones):
             return index
 
 
+# In Ultimate, the bone's x-axis points from parent to child.
+# In Blender, the bone's y-axis points from parent to child.
+# https://en.wikipedia.org/wiki/Matrix_similarity
+# Built once instead of rebuilt and re-inverted on every call; this runs
+# hundreds of thousands of times during a model or animation import.
+_ULTIMATE_TO_BLENDER_BASIS = Matrix([
+    [0, -1, 0, 0],
+    [1, 0, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1]
+])
+_ULTIMATE_TO_BLENDER_BASIS_INV = _ULTIMATE_TO_BLENDER_BASIS.inverted()
+
+
 def get_blender_transform(m) -> Matrix:
     m = Matrix(m).transposed()
-
-    # In Ultimate, the bone's x-axis points from parent to child.
-    # In Blender, the bone's y-axis points from parent to child.
-    # https://en.wikipedia.org/wiki/Matrix_similarity
-    p = Matrix([
-        [0, -1, 0, 0],
-        [1, 0, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
     # Perform the transformation m in Ultimate's basis and convert back to Blender.
-    return p @ m @ p.inverted()
+    return _ULTIMATE_TO_BLENDER_BASIS @ m @ _ULTIMATE_TO_BLENDER_BASIS_INV
 
 def are_vectors_close(a: mathutils.Vector, b: mathutils.Vector) -> bool:
     return all(math.isclose(a[i], b[i], abs_tol=0.00001) for i in [0,1,2])
@@ -1087,7 +1091,9 @@ def attach_armature_create_vertex_groups(mesh_obj, skel, armature, ssbh_mesh_obj
             vertex_group.add([int(i) for i in ssbh_mesh_object.vertex_indices], 1.0, 'REPLACE')
         else:
             # Set the vertex skin weights for each bone.
-            # TODO: Is there a faster way than setting weights per vertex?
+            # VertexGroup.add() takes a list of indices, so vertices that share a
+            # weight go in together. Smash weights are quantized, so a bone's
+            # influences collapse to a handful of calls instead of one per vertex.
             for influence in ssbh_mesh_object.bone_influences:
                 # Avoid creating duplicate vertex groups.
                 # Influences may refer to effect bones not in the skel for some models.
@@ -1096,8 +1102,25 @@ def attach_armature_create_vertex_groups(mesh_obj, skel, armature, ssbh_mesh_obj
                 else:
                     vertex_group = mesh_obj.vertex_groups.new(name=influence.bone_name)
 
+                weight_to_indices: dict[float, list[int]] = {}
+                seen_indices: set[int] = set()
+                duplicate_index = False
                 for w in influence.vertex_weights:
-                    vertex_group.add([int(w.vertex_index)], w.vertex_weight, 'REPLACE')
+                    vertex_index = int(w.vertex_index)
+                    if vertex_index in seen_indices:
+                        # A repeated index means later writes must overwrite earlier
+                        # ones in order, so grouping is not safe here.
+                        duplicate_index = True
+                        break
+                    seen_indices.add(vertex_index)
+                    weight_to_indices.setdefault(w.vertex_weight, []).append(vertex_index)
+
+                if duplicate_index:
+                    for w in influence.vertex_weights:
+                        vertex_group.add([int(w.vertex_index)], w.vertex_weight, 'REPLACE')
+                else:
+                    for weight, indices in weight_to_indices.items():
+                        vertex_group.add(indices, weight, 'REPLACE')
 
         # Convert from Y up to Z up.
         mesh_obj.data.transform(Matrix.Rotation(math.radians(90), 4, 'X'))
