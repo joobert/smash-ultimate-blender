@@ -746,6 +746,11 @@ class SubSceneProperties(PropertyGroup):
         description="Whether the Ambient SH section is expanded",
         default=True,
     )
+    stage_bf_ref_expanded: BoolProperty(
+        name="Battlefield Reference Expanded",
+        description="Whether the Battlefield Reference section is expanded",
+        default=True,
+    )
     last_stage_light_dir: StringProperty(
         name="Last Stage Light Directory",
         description="Last folder used for light.nuanmb import or export",
