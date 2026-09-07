@@ -529,9 +529,13 @@ class SUB_OP_batch_export_anim(Operator):
         return max(last_frame, 1)  # Ensure we always have at least 1 frame
     
     def execute(self, context):
+        from ..doctor import preflight
+        if not preflight(context, self, 'ANIM'):
+            return {'CANCELLED'}
+
         ssp = context.scene.sub_scene_properties
         obj = context.active_object
-        
+
         # Store current action
         current_action = None
         if obj.animation_data:
@@ -940,6 +944,10 @@ class SUB_OP_anim_export(Operator):
         layout.prop(self, "last_blender_frame")
 
     def execute(self, context):
+        from ..doctor import preflight
+        if not preflight(context, self, 'ANIM'):
+            return {'CANCELLED'}
+
         # Save directory for future use
         ssp = context.scene.sub_scene_properties
         ssp.last_anim_export_dir = os.path.dirname(self.filepath)

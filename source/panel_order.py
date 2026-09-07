@@ -24,6 +24,7 @@ PANEL_META = (
     ("SUB_PT_import_anim", "Animation Importer"),
     ("SUB_PT_raw_animations", "Raw Animations"),
     ("SUB_PT_export_anim", "Animation Exporter"),
+    ("SUB_PT_smash_export_doctor", "Export Doctor"),
     ("SUB_PT_animation_tools", "Animation Tools"),
     ("SUB_PT_model_tools", "Model Tools"),
     ("SUB_PT_collection_presets", "Armature Collection Presets"),

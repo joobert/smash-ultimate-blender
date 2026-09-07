@@ -86,6 +86,10 @@ def register():
     from .source import retargeting
     retargeting.register()
 
+    # Export Doctor owns its own Scene property, so it registers itself.
+    from .source import doctor
+    doctor.register()
+
     # Last, once every panel exists: Panel Presets owns both sidebar visibility
     # and sidebar order, and its registration applies the saved layout.
     from .source.extras import panel_presets
@@ -105,6 +109,9 @@ def unregister():
     # Unregister panel presets first (restores original panel polls)
     from .source.extras import panel_presets
     panel_presets.unregister()
+
+    from .source import doctor
+    doctor.unregister()
 
     # Unregister retargeting module first (expy_kit integration)
     from .source import retargeting

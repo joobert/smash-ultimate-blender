@@ -269,6 +269,12 @@ class SUB_OP_model_exporter(Operator):
         return {'RUNNING_MODAL'}
     
     def execute(self, context):
+        # Preflight first, so a scene that cannot produce a valid model never
+        # gets as far as writing half a file set.
+        from ..doctor import preflight
+        if not preflight(context, self, 'MODEL'):
+            return {'CANCELLED'}
+
         start = time.perf_counter()
         with cProfile.Profile() as pr:
             export_model(self, context, self.directory, self.include_numdlb, self.include_numshb, self.include_numshexb,
@@ -544,18 +550,18 @@ def export_model(operator: bpy.types.Operator, context, directory, include_numdl
 
     arma.data.pose_position = old_pose_position
 
-def create_skel_and_prc(operator, context, linked_nusktb_settings, folder) -> tuple[ssbh_data_py.skel_data.SkelData, Any]:
+def create_skel_and_prc(operator, context, linked_nusktb_settings, folder) -> tuple[ssbh_data_py.skel_data.SkelData | None, Any]:
     try:
         ssbh_skel_data, prc = make_skel(operator, context, linked_nusktb_settings)
     except RuntimeError as e:
         operator.report({'ERROR'},  f'Failed to make skel for export, Error="{e}" ; Traceback=\n{traceback.format_exc()}')
-        return
+        return (None, None)
 
     # The uniform buffer for bone transformations in the skinning shader has a fixed size.
     # Limit exports to 511 bones to prevent rendering issues and crashes in game.
     if len(ssbh_skel_data.bones) > 511:
         operator.report({'ERROR'}, f'{len(ssbh_skel_data.bones)} bones exceeds the maximum supported count of 511.')
-        return
+        return (None, None)
 
     """path = str(folder.joinpath('model.nusktb'))
     try:
