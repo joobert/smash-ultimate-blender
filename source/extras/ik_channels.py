@@ -14,6 +14,40 @@ PREFIX = 'BL_SUB_IK_'
 OUTPUT = 'SUB IK Blend'
 VERSION = 'sub_independent_ik'
 MATCH_KEY = 'sub_ik_channel_matches'
+END_ROTATION = 'SUB IK End Rotation'
+END_SCALE = 'SUB IK End Scale'
+END_LOCATION = 'SUB IK Stretch'
+
+
+def end_constraints(end):
+    return [c for c in end.constraints
+            if c.name in {END_ROTATION, END_SCALE, END_LOCATION}]
+
+
+def wire_end_controls(obj):
+    """Repair old endpoint transforms without rebuilding or rematching the rig."""
+    from .create_animation_rig import _ensure_constraint_influence_driver
+    for kind, names, target, _ in chains(obj):
+        end = obj.pose.bones.get(PREFIX + names[2])
+        if end is None:
+            continue
+        for con in list(end.constraints):
+            if con.type == 'COPY_TRANSFORMS' and con.target == obj and con.subtarget == target:
+                con.driver_remove('influence')
+                end.constraints.remove(con)
+        for name, type_ in ((END_ROTATION, 'COPY_ROTATION'),
+                            (END_SCALE, 'COPY_SCALE'),
+                            (END_LOCATION, 'COPY_LOCATION')):
+            con = end.constraints.get(name)
+            if con is None:
+                con = end.constraints.new(type_)
+                con.name = name
+                con.target = obj
+                con.subtarget = target
+                con.target_space = con.owner_space = 'POSE'
+            if name == END_LOCATION:
+                _ensure_constraint_influence_driver(
+                    obj, end, con, 'sub_ik_stretch_' + kind.lower())
 
 
 def create_controls(context, obj, limbs='BOTH'):
@@ -22,10 +56,10 @@ def create_controls(context, obj, limbs='BOTH'):
     rig._activate_armature(context, obj)
     jobs = []
     for b in obj.data.bones:
-        match = re.fullmatch(r'(Leg|Shoulder)([LR]\d*(?:\.\d{3})*)', b.name)
-        if not match:
+        bone_match = re.fullmatch(r'(Leg|Shoulder)([LR]\d*(?:\.\d{3})*)', b.name)
+        if not bone_match:
             continue
-        part, suffix = match.groups()
+        part, suffix = bone_match.groups()
         kind = 'LEGS' if part == 'Leg' else 'ARMS'
         if limbs not in (kind, 'BOTH'):
             continue
@@ -42,7 +76,7 @@ def create_controls(context, obj, limbs='BOTH'):
                 control = bones.new(target)
                 control.matrix = end.matrix.copy()
                 control.length = max(end.length * 1.5, .1)
-                control.parent = bones.get('Trans')
+                control.parent = None
                 control.use_deform = False
             if pole not in bones:
                 axis = (end.head-root.head).normalized()
@@ -52,7 +86,7 @@ def create_controls(context, obj, limbs='BOTH'):
                 control = bones.new(pole)
                 control.head = mid.head + bend.normalized() * (root.length + mid.length)
                 control.tail = control.head + Vector((0, max(mid.length*.25, .1), 0))
-                control.parent = bones.get('Trans')
+                control.parent = None
                 control.use_deform = False
         bpy.ops.object.mode_set(mode='POSE')
         collection = obj.data.collections.get('IK Bones') or obj.data.collections.new('IK Bones')
@@ -61,6 +95,12 @@ def create_controls(context, obj, limbs='BOTH'):
                 collection.assign(obj.data.bones[n])
                 obj.data.bones[n].color.palette = 'THEME01'
         ensure(obj, context, limbs)
+        if jobs:
+            # Seed the new controls from the current FK pose before enabling IK.
+            match(context, obj, limbs, entire=False, key=True)
+            rig._key_use_ik(obj, context.scene.frame_current, limbs=limbs, enabled=True)
+            rig._set_ik_enabled(context, obj, True, limbs=limbs)
+            context.view_layer.update()
     return len(jobs)
 
 
@@ -141,7 +181,7 @@ def ensure(obj, context, limbs='BOTH'):
             for name in (target, pole):
                 control = bones[name]
                 matrix = control.matrix.copy()
-                control.parent = bones.get('Trans')
+                control.parent = None
                 control.use_connect = False
                 control.matrix = matrix
         bpy.ops.object.mode_set(mode='POSE')
@@ -177,18 +217,14 @@ def ensure(obj, context, limbs='BOTH'):
             con.chain_count = 2
             con.use_stretch = False
             con.iterations = 200
-            end = obj.pose.bones[PREFIX + names[2]]
-            con = end.constraints.new('COPY_TRANSFORMS')
-            con.target = obj
-            con.subtarget = target
-            con.target_space = con.owner_space = 'POSE'
-    obj.data[VERSION] = 1
+    obj.data[VERSION] = 2
     wire(obj)
     context.view_layer.update()
 
 
 def wire(obj):
     from .create_animation_rig import _ensure_constraint_influence_driver, _limb_switch_prop
+    wire_end_controls(obj)
     for pb, con, kind in outputs(obj):
         _ensure_constraint_influence_driver(obj, pb, con, _limb_switch_prop(kind))
         con.mute = False
@@ -320,7 +356,8 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False):
                     solver = [obj.pose.bones[PREFIX + name] for name in names]
                     con = solver[1].constraints['SUB IK Solve']
                     con.mute = True
-                    solver[2].constraints[0].mute = True
+                    for endpoint in end_constraints(solver[2]):
+                        endpoint.mute = True
                     context.view_layer.update()
                     for pb, name in zip(solver, names):
                         pb.matrix = matrices[name]
@@ -352,7 +389,8 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False):
                     m.translation = mid + bend * max((mid-root).length + (end-mid).length, 0.5)
                     pole_pb.matrix = m
                     con.mute = False
-                    solver[2].constraints[0].mute = False
+                    for endpoint in end_constraints(solver[2]):
+                        endpoint.mute = False
                     con.pole_angle = 0.0
                     context.view_layer.update()
                     # Angle from the zero-angle solve to the desired bend plane.

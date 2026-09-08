@@ -713,7 +713,7 @@ def check_duplicate_names(scene):
 @check(
     'skeleton_bones',
     'Missing or extra skeleton bones',
-    'Standard bones must match the vanilla .nusktb the model is replacing.',
+    'Compare standard bones with the base character; custom armatures may intentionally differ.',
     scopes=(SCOPE_MODEL,),
 )
 def check_skeleton_bones(scene):
@@ -750,13 +750,13 @@ def check_skeleton_bones(scene):
     for bone in sorted(missing_bones):
         results.append(DoctorResult(
             check_id='skeleton_bones',
-            severity=ERROR,
+            severity=WARNING,
             message=f'Standard bone "{bone}" is missing from the armature.',
-            detail='The vanilla skeleton has it. Animations and in-game code that reference it '
-                   'will break. Re-add the bone or pick a different vanilla .nusktb.',
+            detail='Custom armatures may intentionally omit bones from the base character. '
+                   'Export is allowed; check any animations or in-game behavior that reference this bone.',
             target_type=TARGET_OBJECT,
             target_name=scene.armature.name,
-            blocking=True,
+            blocking=False,
         ))
 
     if new_bones:
@@ -958,6 +958,7 @@ def check_export_paths(scene):
     watched = (
         ('vanilla_nusktb', 'FILE', 'Vanilla .nusktb', True),
         ('vanilla_update_prc', 'FILE', 'Vanilla update.prc', True),
+        ('vanilla_flip_prc', 'FILE', 'Base flip.prc', True),
         ('model_import_folder_path', 'DIR', 'Model import folder', False),
         ('last_model_folder', 'DIR', 'Last model folder', False),
         ('animation_import_folder_path', 'DIR', 'Animation import folder', False),

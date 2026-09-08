@@ -155,6 +155,7 @@ def refresh_presets(context, select_path=""):
         try:
             preset = _load_path(path)
             item.name = preset.get("name") or item.name
+            item.model_folder = preset.get("model_folder", "")
             item.version = int(preset.get("version", 1))
             item.is_valid = True
             item.is_legacy = bool(preset.get("legacy_source") or item.version < FORMAT_VERSION)
@@ -744,6 +745,7 @@ def _preset_and_armature(context, operator):
 
 
 class SUB_PG_collection_preset_item(PropertyGroup):
+    model_folder: StringProperty(default="")
     path: StringProperty(subtype='FILE_PATH')
     version: IntProperty(default=0)
     is_valid: BoolProperty(default=False)
@@ -829,6 +831,90 @@ class SUB_OP_collection_presets_refresh(Operator):
         return {'FINISHED'}
 
 
+def _model_folder_parts(path):
+    return [part for part in str(path).replace("\\", "/").split("/") if part]
+
+
+def auto_apply_model_preset(context, armature, model_folder, operator):
+    """Apply the closest uniquely linked preset from the active library."""
+    if not hasattr(context.scene, "sub_collection_presets"):
+        return
+    directory = _library_dir(context, create=False)
+    if not directory or not os.path.isdir(directory):
+        return
+    parts = [part.casefold() for part in reversed(_model_folder_parts(model_folder))]
+    matches = []
+    for filename in sorted(os.listdir(directory), key=str.casefold):
+        if not filename.lower().endswith(".json"):
+            continue
+        try:
+            preset = _load_path(os.path.join(directory, filename))
+            linked = preset.get("model_folder", "").strip().casefold()
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        if linked and linked in parts:
+            matches.append((parts.index(linked), preset))
+    if not matches:
+        return
+    nearest = min(rank for rank, _preset in matches)
+    presets = [preset for rank, preset in matches if rank == nearest]
+    if len(presets) != 1:
+        operator.report({'WARNING'}, "Collection preset auto-apply skipped: multiple presets link to this model folder")
+        return
+    preset = presets[0]
+    report = apply_preset(preset, armature, context)
+    context.scene.sub_collection_presets.last_report = format_report(preset, report, applied=True)
+    operator.report({'INFO'}, f"Auto-applied collection preset {preset.get('name', 'Unnamed')!r}")
+
+
+class SUB_OP_collection_preset_link_model(Operator):
+    bl_idname = "sub.collection_preset_link_model"
+    bl_label = "Link to Model Folder"
+    bl_description = "Auto-apply this preset when an imported model path contains this folder name; blank removes the link"
+
+    model_folder: StringProperty(name="Model Folder Name", default="")
+
+    @classmethod
+    def poll(cls, context):
+        item = _active_item(context)
+        return item is not None and item.is_valid
+
+    def invoke(self, context, _event):
+        item = _active_item(context)
+        self.model_folder = item.model_folder
+        if not self.model_folder:
+            obj = context.active_object
+            path = obj.get("sub_smash_model_folder", "") if obj else ""
+            parts = _model_folder_parts(path)
+            # Prefer the fighter/model name over a generic costume folder.
+            model_index = next((i for i, part in enumerate(parts) if part.casefold() == 'model'), -1)
+            self.model_folder = parts[model_index - 1] if model_index > 0 else (parts[-1] if parts else "")
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        self.layout.prop(self, "model_folder")
+        self.layout.label(text="Matches a folder name anywhere in the model path.")
+        self.layout.label(text="Leave blank to disable automatic application.")
+
+    def execute(self, context):
+        item = _active_item(context)
+        if item is None or not item.is_valid:
+            return {'CANCELLED'}
+        folder = self.model_folder.strip()
+        if folder in {'.', '..'} or '/' in folder or "\\" in folder:
+            self.report({'ERROR'}, "Enter one folder name, not a full path")
+            return {'CANCELLED'}
+        try:
+            preset = _load_path(item.path)
+            preset["model_folder"] = folder
+            _write_preset(item.path, preset)
+        except (OSError, ValueError) as error:
+            self.report({'ERROR'}, f"Could not save model folder link: {error}")
+            return {'CANCELLED'}
+        refresh_presets(context, item.path)
+        return {'FINISHED'}
+
+
 class SUB_OP_collection_preset_save(Operator):
     bl_idname = "sub.collection_preset_save"
     bl_label = "Save Collection Preset"
@@ -859,6 +945,8 @@ class SUB_OP_collection_preset_save(Operator):
             self.report({'ERROR'}, "A preset with this name exists; enable Overwrite Existing")
             return {'CANCELLED'}
         preset = build_preset(name, context.active_object, context)
+        if os.path.exists(path):
+            preset["model_folder"] = _load_path(path).get("model_folder", "")
         _write_preset(path, preset)
         refresh_presets(context, path)
         self.report({'INFO'}, f"Saved collection preset {name!r}")
@@ -887,7 +975,9 @@ class SUB_OP_collection_preset_update(Operator):
         item = _active_item(context)
         if not item:
             return {'CANCELLED'}
+        previous = _load_path(item.path)
         preset = build_preset(item.name, context.active_object, context)
+        preset["model_folder"] = previous.get("model_folder", "")
         _write_preset(item.path, preset)
         refresh_presets(context, item.path)
         self.report({'INFO'}, f"Updated collection preset {item.name!r}")
@@ -1084,6 +1174,7 @@ class SUB_OP_collection_preset_duplicate(Operator):
             return {'CANCELLED'}
         preset = _load_path(item.path)
         preset["name"] = name
+        preset.pop("model_folder", None)
         preset["version"] = FORMAT_VERSION
         preset["format"] = FORMAT_ID
         preset.pop("legacy_source", None)
@@ -1242,6 +1333,10 @@ class SUB_PT_collection_presets(Panel):
         actions.scale_y = 1.3
         actions.operator("sub.collection_preset_preview", text="Preview", icon='HIDE_OFF')
         actions.operator("sub.collection_preset_apply", text="Apply", icon='CHECKMARK')
+        item = _active_item(context)
+        layout.operator("sub.collection_preset_link_model", text="Link to Model Folder", icon='LINKED')
+        if item and item.model_folder:
+            layout.label(text=f"Auto-apply: {item.model_folder}", icon='FILE_FOLDER')
         if props.last_report:
             layout.operator("sub.collection_preset_report", text="View Last Report", icon='TEXT')
 
@@ -1281,6 +1376,7 @@ CLASSES = (
     SUB_PG_collection_preset_settings,
     SUB_UL_collection_presets,
     SUB_OP_collection_presets_refresh,
+    SUB_OP_collection_preset_link_model,
     SUB_OP_collection_preset_save,
     SUB_OP_collection_preset_update,
     SUB_OP_collection_preset_apply,

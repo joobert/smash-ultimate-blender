@@ -1,5 +1,6 @@
 import os
 import os.path
+from ..import_paths import walk_import_folders
 import re
 import bpy
 import mathutils
@@ -54,7 +55,7 @@ def find_model_folders(root_directory: str) -> list[str]:
         return [root]
 
     found = []
-    for dirpath, dirnames, _filenames in os.walk(root):
+    for dirpath, dirnames, _filenames in walk_import_folders(root):
         if _is_importable_model_folder(dirpath):
             found.append(dirpath)
             dirnames.clear()
@@ -203,7 +204,7 @@ def populate_mods_directory_models(ssp, directory: str) -> int:
 
     ssp.model_import_models.clear()
     count = 0
-    for root, dirs, files in os.walk(directory):
+    for root, dirs, files in walk_import_folders(directory):
         for dir_name in dirs:
             body_folder_path = os.path.join(root, dir_name, "body")
             if os.path.exists(body_folder_path):
@@ -344,7 +345,7 @@ class SUB_OP_select_model_import_folder(Operator):
     bl_options = {'UNDO'}
 
     filter_glob: StringProperty(
-        default='*.numdlb;*.nusktb;*.numshb;*.numatb;*.nuhlpb',
+        default='*',
         options={'HIDDEN'}
     )
     directory: bpy.props.StringProperty(subtype="DIR_PATH")
@@ -557,7 +558,7 @@ class SUB_OP_select_individual_model(Operator):
     bl_options = {'UNDO'}
 
     filter_glob: StringProperty(
-        default='*.numdlb;*.nusktb;*.numshb;*.numatb;*.nuhlpb',
+        default='*',
         options={'HIDDEN'}
     )
     directory: bpy.props.StringProperty(subtype="DIR_PATH")
@@ -804,45 +805,16 @@ def import_model(operator: bpy.types.Operator, context: bpy.types.Context):
         except Exception:
             pass
 
-    # Auto-store predefined idle animations if they exist
-    if len(ssp.animation_import_files) > 0:
-        # Initialize predefined poses list first
-        from ..extras.idle_pose_library import initialize_predefined_poses
-        initialize_predefined_poses(context)
-        
-        # Look for predefined animation files
-        predefined_poses = ["a00wait1", "a05squatwait", "a04fall", "a04fallaerial"]
-        stored_poses = []
-        
-        for pose_name in predefined_poses:
-            idle_anim_path = None
-            for anim_item in ssp.animation_import_files:
-                if anim_item.name == pose_name:
-                    idle_anim_path = anim_item.path
-                    break
-            
-            # If found, automatically store it using the idle pose library
-            if idle_anim_path:
-                # Make sure the armature is selected
-                if armature:
-                    # Select the armature
-                    for obj in bpy.context.selected_objects:
-                        obj.select_set(False)
-                    armature.select_set(True)
-                    context.view_layer.objects.active = armature
-                    
-                    # Store the idle pose
-                    try:
-                        bpy.ops.sub.store_idle_pose(filepath=idle_anim_path)
-                        stored_poses.append(pose_name)
-                    except Exception as e:
-                        operator.report({'WARNING'}, f"Failed to auto-store idle pose {pose_name}: {str(e)}")
-        
-        # Report what was stored
-        if stored_poses:
-            operator.report({'INFO'}, f"Auto-stored idle poses: {', '.join(stored_poses)}")
-        else:
-            operator.report({'INFO'}, "No predefined idle animations found to auto-store")
+    # File-backed idle poses are resolved from the active animation folder on use.
+    from ..extras.idle_pose_library import initialize_predefined_poses
+    initialize_predefined_poses(context)
+
+    if armature is not None:
+        try:
+            from ..extras.collection_presets import auto_apply_model_preset
+            auto_apply_model_preset(context, armature, str(dir), operator)
+        except Exception as error:
+            operator.report({'WARNING'}, f'Collection preset auto-apply failed: {error}')
 
     return {'FINISHED'}
 

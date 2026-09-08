@@ -23,19 +23,34 @@ def get_predefined_poses():
     ]
 
 def initialize_predefined_poses(context):
-    """Initialize the predefined poses in the scene properties if not already done"""
+    """Refresh predefined poses from the current animation folder."""
     ssp = context.scene.sub_scene_properties
     
-    # Check if predefined poses are already initialized
-    predefined_names = [pose[0] for pose in get_predefined_poses()]
+    refresh_idle_poses(ssp)
+
+
+def refresh_idle_poses(ssp):
+    """Rebuild file-backed entries from the active folder; retain saved custom poses."""
+    selected = (ssp.idle_pose_list[ssp.idle_pose_list_index].name
+                if 0 <= ssp.idle_pose_list_index < len(ssp.idle_pose_list) else '')
+    predefined = {pose[0] for pose in get_predefined_poses()}
+    for index in reversed(range(len(ssp.idle_pose_list))):
+        pose = ssp.idle_pose_list[index]
+        if pose.name in predefined and not pose.is_custom:
+            ssp.idle_pose_list.remove(index)
+    folder = ssp.animation_import_folder_path
+    available = ({p.stem.casefold() for p in Path(bpy.path.abspath(folder)).glob('*.nuanmb')}
+                 if folder else set())
     existing_names = [pose.name for pose in ssp.idle_pose_list]
     
     # Add missing predefined poses
     for name, _, description in get_predefined_poses():
-        if name not in existing_names:
+        if name not in existing_names and name.casefold() in available:
             new_pose = ssp.idle_pose_list.add()
             new_pose.name = name
             new_pose.data = ""  # Empty data indicates predefined pose
+    ssp.idle_pose_list_index = next(
+        (i for i, pose in enumerate(ssp.idle_pose_list) if pose.name == selected), 0)
 
 def apply_pose_with_options(context, pose_data_str, include_trans=True, mirrored=False, rotate_180=False):
     """Apply pose data with the specified options"""
@@ -237,11 +252,13 @@ class SUB_OP_store_idle_pose(Operator):
             if existing_pose:
                 # Update existing pose
                 existing_pose.data = json.dumps(pose_data)
+                existing_pose.is_custom = True
             else:
                 # Add new pose
                 new_pose = ssp.idle_pose_list.add()
                 new_pose.name = pose_name
                 new_pose.data = json.dumps(pose_data)
+                new_pose.is_custom = True
             
             self.report({'INFO'}, f"Successfully stored idle pose from {Path(self.filepath).name}")
             return {'FINISHED'}
@@ -302,9 +319,8 @@ class SUB_OP_apply_idle_pose_from_list(Operator):
     def execute(self, context):
         ssp = context.scene.sub_scene_properties
         
-        # Initialize predefined poses if needed (only if list is empty)
-        if not ssp.idle_pose_list:
-            initialize_predefined_poses(context)
+        # Refresh saved scenes and pick up files added since the folder changed.
+        initialize_predefined_poses(context)
         
         if not ssp.idle_pose_list:
             self.report({'ERROR'}, "No poses available in the library")
@@ -317,11 +333,12 @@ class SUB_OP_apply_idle_pose_from_list(Operator):
         selected_pose = ssp.idle_pose_list[ssp.idle_pose_list_index]
         
         # Check if this is a predefined pose without data
-        if not selected_pose.data:
+        pose_data_str = selected_pose.data
+        if not selected_pose.is_custom and selected_pose.name in {p[0] for p in get_predefined_poses()}:
             # This is a predefined pose that needs to be loaded from animation file
             # Try to find the animation file in the animation import folder
             if hasattr(ssp, 'animation_import_folder_path') and ssp.animation_import_folder_path:
-                animation_path = Path(ssp.animation_import_folder_path) / f"{selected_pose.name}.nuanmb"
+                animation_path = Path(bpy.path.abspath(ssp.animation_import_folder_path)) / f"{selected_pose.name}.nuanmb"
                 if animation_path.exists():
                     # Load the animation data
                     try:
@@ -369,8 +386,8 @@ class SUB_OP_apply_idle_pose_from_list(Operator):
                                         # Store the data
                                         pose_data[node.name] = transform_data
                         
-                        # Store the pose data for future use
-                        selected_pose.data = json.dumps(pose_data)
+                        # Keep file-backed data local so it never outlives its folder context.
+                        pose_data_str = json.dumps(pose_data)
                         
                     except Exception as e:
                         self.report({'ERROR'}, f"Error loading {selected_pose.name}: {str(e)}")
@@ -388,11 +405,11 @@ class SUB_OP_apply_idle_pose_from_list(Operator):
         rotate_180 = ssp.idle_pose_180_rotate
         
         # Apply the pose using the helper function
-        result, message = apply_pose_with_options(context, selected_pose.data, include_trans, mirrored, rotate_180)
+        result, message = apply_pose_with_options(context, pose_data_str, include_trans, mirrored, rotate_180)
         
         if result == {'FINISHED'}:
             self.report({'INFO'}, f"Applied '{selected_pose.name}' pose - {message.split('-')[-1].strip()}")
         else:
             self.report({'ERROR'}, message)
         
-        return result 
+        return result

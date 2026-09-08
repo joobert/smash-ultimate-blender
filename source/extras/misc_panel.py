@@ -84,6 +84,7 @@ class SUB_PT_animation_tools(Panel):
         
         # Only show content if expanded
         if ssp.idle_pose_library_expanded:
+            box.label(text=ssp.animation_import_folder_path or 'No active animation folder', icon='FILE_FOLDER')
             # Checkboxes
             row = box.row(align=True)
             row.prop(ssp, "idle_pose_include_trans", text="Include Trans Bone")

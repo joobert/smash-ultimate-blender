@@ -14,8 +14,9 @@ from pathlib import Path
 from ...dependencies import ssbh_data_py
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty, FloatProperty, EnumProperty
-from bpy.types import Operator, Panel
+from bpy.types import Operator, Panel, Menu
 from mathutils import Matrix, Quaternion, Vector
+from ..import_paths import walk_import_folders
 from ..model.import_model import get_blender_transform
 from ..blender_compat import assign_action, draw_progress, ensure_action_slot
 from ..addon_preferences import format_animation_name_on_import
@@ -41,8 +42,21 @@ ANIM_FOLDER_KEY = "sub_anim_import_folder"
 _last_anim_sync_ptr = 0
 
 
+def remember_animation_folder(ssp, folder):
+    if not folder:
+        return
+    folder = os.path.normpath(bpy.path.abspath(str(folder)))
+    key = os.path.normcase(folder)
+    if not any(os.path.normcase(item.path) == key for item in ssp.animation_import_folders):
+        item = ssp.animation_import_folders.add()
+        item.path = folder
+
+
 def fill_animation_import_list(ssp, folder):
+    remember_animation_folder(ssp, ssp.animation_import_folder_path)
+    remember_animation_folder(ssp, folder)
     ssp.animation_import_files.clear()
+    ssp.animation_import_files_index = 0
     if not folder or not os.path.isdir(folder):
         ssp.animation_import_folder_path = folder or ""
         return 0
@@ -805,9 +819,9 @@ class SUB_PT_import_anim(Panel):
         if obj and obj.select_get() and (obj.type == 'ARMATURE' or obj.type == 'CAMERA'):
             # Add button to browse for an animation folder
             row = layout.row()
-            row.operator(SUB_OP_select_animation_folder.bl_idname, icon='ZOOM_ALL', text='Browse Animation Folder')
+            row.operator(SUB_OP_select_animation_folder.bl_idname, icon='ZOOM_ALL', text='Add Animation Folder')
             
-            if ssp.animation_import_folder_path and len(ssp.animation_import_files) > 0:
+            if ssp.animation_import_folder_path or len(ssp.animation_import_folders) > 0:
                 # Collapsible Related Animations section
                 box = layout.box()
                 header_row = box.row()
@@ -835,7 +849,7 @@ class SUB_PT_import_anim(Panel):
                     
                     if ssp.animation_import_folder_path:
                         row = box.row()
-                        row.label(text=f"Folder: {ssp.animation_import_folder_path}")
+                        row.menu(SUB_MT_animation_folders.bl_idname, text=f"Folder: {ssp.animation_import_folder_path}")
                     
                     row = box.row()
                     row.template_list(
@@ -1955,82 +1969,72 @@ def update_camera_transforms(camera: bpy.types.Object, transform_group, index, f
     camera.matrix_local = axis_correction @ translation @ rotation @ scale
     keyframe_insert_camera_locrotscale(camera, frame)
 
-class SUB_OP_select_animation_folder(Operator):
-    bl_idname = 'sub.ssbh_animation_folder_selector'
-    bl_label = 'Import Anim Folder'
-    bl_description = 'Choose a folder containing .nuanmb animation files'
+class SUB_MT_animation_folders(Menu):
+    bl_idname = 'SUB_MT_animation_folders'
+    bl_label = 'Animation Folders'
+
+    def draw(self, context):
+        ssp = context.scene.sub_scene_properties
+        paths = [item.path for item in ssp.animation_import_folders]
+        if ssp.animation_import_folder_path and ssp.animation_import_folder_path not in paths:
+            paths.append(ssp.animation_import_folder_path)
+        for path in paths:
+            op = self.layout.operator(
+                SUB_OP_switch_animation_folder.bl_idname, text=path,
+                icon='CHECKMARK' if path == ssp.animation_import_folder_path else 'FILE_FOLDER')
+            op.folder = path
+
+
+class SUB_OP_switch_animation_folder(Operator):
+    bl_idname = 'sub.switch_animation_folder'
+    bl_label = 'Switch Animation Folder'
     bl_options = {'UNDO'}
 
-    filter_glob: StringProperty(
-        default='*.nuanmb',
-        options={'HIDDEN'}
-    )
-    directory: bpy.props.StringProperty(subtype="DIR_PATH")
+    folder: StringProperty(subtype='DIR_PATH')
+
+    def execute(self, context):
+        ssp = context.scene.sub_scene_properties
+        fill_animation_import_list(ssp, self.folder)
+        obj = context.object
+        if obj is not None and obj.type == 'ARMATURE':
+            bind_anim_folder_to_armature(obj, self.folder)
+        return {'FINISHED'}
+
+
+class SUB_OP_select_animation_folder(Operator):
+    bl_idname = 'sub.ssbh_animation_folder_selector'
+    bl_label = 'Add Animation Folder'
+    bl_description = 'Add a folder, including linked folders, containing .nuanmb animations'
+    bl_options = {'UNDO'}
+
+    filter_glob: StringProperty(default='*', options={'HIDDEN'})
+    directory: StringProperty(subtype='DIR_PATH')
 
     def invoke(self, context, _event):
+        self.directory = context.scene.sub_scene_properties.animation_import_folder_path
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
         ssp = context.scene.sub_scene_properties
-        anim_path = Path(self.directory)
-
-        # First, try the direct selected path
-        if anim_path.exists():
-            animation_count = fill_animation_import_list(ssp, str(anim_path))
-
-            if animation_count:
-                self.report({'INFO'}, f'Found {animation_count} animations in: {anim_path}')
-            # If no animations were found, check if we're in a fighter folder
-            elif "fighter" in str(anim_path):
-                # Try to find the structure motion/body/[first subfolder]
-                try:
-                    # First check if this is already a fighter folder
-                    if "motion" in os.listdir(anim_path):
-                        fighter_folder = anim_path
-                    else:
-                        # Try to find the fighter folder (this might be a subfolder)
-                        parts = str(anim_path).split("fighter")
-                        if len(parts) > 1:
-                            fighter_folder = Path(parts[0] + "fighter" + parts[1].split(os.sep)[0])
-                    
-                    motion_folder = fighter_folder / "motion"
-                    
-                    if motion_folder.exists():
-                        body_folder = motion_folder / "body"
-                        
-                        if body_folder.exists():
-                            # Get the first subfolder in body
-                            try:
-                                subfolders = [f for f in os.listdir(body_folder) if os.path.isdir(body_folder / f)]
-                                if subfolders:
-                                    deep_anim_path = body_folder / subfolders[0]
-                                    
-                                    if deep_anim_path.exists():
-                                        deep_animation_count = fill_animation_import_list(ssp, str(deep_anim_path))
-
-                                        if deep_animation_count:
-                                            self.report({'INFO'}, f'Found {deep_animation_count} animations in deep path: {deep_anim_path}')
-                                        else:
-                                            self.report({'INFO'}, f'No animations found in deep path: {deep_anim_path}')
-                            except Exception as e:
-                                self.report({'INFO'}, f'Failed to search in deep animation path: {str(e)}')
-                except Exception as e:
-                    self.report({'INFO'}, f'Failed to find deep animation structure: {str(e)}')
-                
-                if len(ssp.animation_import_files) == 0:
-                    self.report({'INFO'}, f'No animations found in: {anim_path} or deeper structure')
-            else:
-                self.report({'INFO'}, f'No animations found in: {anim_path}')
-        else:
-            fill_animation_import_list(ssp, str(anim_path))
-            self.report({'ERROR'}, f'Animation directory not found: {anim_path}')
-
+        folder = os.path.normpath(bpy.path.abspath(self.directory))
+        if not os.path.isdir(folder):
+            self.report({'ERROR'}, f'Animation directory not found: {folder}')
+            return {'CANCELLED'}
+        folders = []
+        for root, dirs, files in walk_import_folders(folder):
+            if any(name.lower().endswith('.nuanmb') for name in files):
+                folders.append(root)
+                if root == folder:
+                    break
+        for path in folders or [folder]:
+            remember_animation_folder(ssp, path)
+        count = fill_animation_import_list(ssp, folders[0] if folders else folder)
         refresh_raw_animation_import_list(ssp)
-        obj = getattr(context, "object", None)
-        if obj is not None and getattr(obj, "type", "") == "ARMATURE":
+        obj = context.object
+        if obj is not None and obj.type == 'ARMATURE':
             bind_anim_folder_to_armature(obj, ssp.animation_import_folder_path)
-            
+        self.report({'INFO'}, f'Added {len(folders) or 1} folder(s); {count} animations in selected folder')
         return {'FINISHED'}
 
 
