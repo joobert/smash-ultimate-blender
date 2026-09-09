@@ -64,6 +64,9 @@ class SUB_PT_matl_data_master(MaterialPanel):
         box = layout.box()
         box.prop(sub_matl_data, "shader_label", emboss=False)
         box.menu(SUB_MT_material_specials.bl_idname)
+        row = layout.row()
+        row.operator_context = 'INVOKE_DEFAULT'
+        row.operator("sub.optimize_textures", icon='IMAGE_DATA')
         
         # Check if material has been converted to Principled BSDF
         from .convert_smash_material import is_converted_to_principled
@@ -157,6 +160,9 @@ class SUB_PT_matl_data_textures(MaterialPanel):
             prop_subrow.alignment = 'RIGHT'
             prop_subrow.scale_x = 1.5
             prop_subrow.prop(texture, "image", text="")
+            if texture.image is not None:
+                width, height = texture.image.size
+                box.label(text=f"{width} x {height}" if width and height else "Image data unavailable")
 
 class SUB_PT_matl_data_samplers(MaterialPanel):
     bl_label = "Samplers"

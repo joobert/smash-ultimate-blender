@@ -35,6 +35,12 @@ class SUB_PT_ik_animation_tools(Panel):
 
         row = box.row(align=True)
         row.operator("sub.toggle_ik_influence", text="Toggle IK Influence", icon="MODIFIER")
+        from .create_animation_rig import find_target_armature
+        arm = find_target_armature(context)
+        if arm and arm.data.get('sub_independent_ik'):
+            row = box.row(align=True)
+            row.prop(arm.data, 'sub_ik_stretch_arms', text='IK Stretch Arms')
+            row.prop(arm.data, 'sub_ik_stretch_legs', text='IK Stretch Legs')
 
         # IK Setup section
         box = layout.box()
@@ -80,4 +86,4 @@ def unregister():
 
 
 if __name__ == "__main__":
-    register() 
+    register()

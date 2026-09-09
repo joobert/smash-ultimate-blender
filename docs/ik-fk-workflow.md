@@ -1,10 +1,14 @@
 # Independent IK and FK
 
-Create legs, arms, or both from IK Tools or Animation Rig, then accept the match dialog to copy the current FK animation to IK. Creation and matching preserve FK transform keys and add no switch keys. New controls start in FK mode.
+Create legs, arms, or both from IK Tools or Animation Rig. Creation matches the current FK pose and inserts an IK mode key at the current frame for the created limbs. The controls are ready to use immediately. Accept the optional match dialog to copy the full FK animation to IK. FK transform keys are preserved.
 
 Switch to FK or Switch to IK keys only that destination at the current frame, for the selected limbs. Place opposite mode keys on different frames to blend between them. Switching does not rematch or overwrite edited controls.
 
+IK Stretch Arms / IK Stretch Legs in the IK controls is off by default. Hands and feet retain their solved position when a target is out of reach. Enable it to let the endpoint follow the target's position. Clicking a stretch button inserts or updates a stepped state key in the same SAP action as the FK/IK switches, even with Auto Key disabled. Scrubbing restores that state. Newly created target and pole controls have no parent; internal solver bones retain their chain hierarchy. Existing independent rigs have their endpoint constraints repaired when the addon loads, without rematching animation.
+
 Matching samples the scene frame range. A newly loaded action, newly created controls, or an unmatched limb makes the match button appear. Matching only one frame does not mark the entire animation matched. Rematch after changing the source FK animation if you want those changes copied into IK.
+
+Position IK Controls evaluates independent limbs together to reduce scene updates, including when Entire Animation is enabled. Solver iterations, pole fitting precision, and keyframe sampling are unchanged. Rigs with external or cross-limb dependencies, unsupported drivers, or animated constraint settings use sequential matching. Interactive pose-tool refreshes are deferred until matching finishes.
 
 Bake & Remove IK allows selecting legs, arms, or all present IK. It samples the evaluated motion before removing those controls and preserves unrelated limb channels.
 

@@ -1,6 +1,9 @@
 import bpy
+import os
 import sqlite3
 import re 
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from bpy.types import ShaderNodeTexImage, ShaderNodeUVMap, ShaderNodeValue, ShaderNodeOutputMaterial, ShaderNodeVertexColor, Operator
 from bpy_extras import image_utils
@@ -53,91 +56,168 @@ def create_default_textures():
     for texture_name, value in generated_default_texture_name_value.items():
         create_default_texture(texture_name, value)
 
+def _index_model_dir(model_dir: Path) -> tuple[dict[str, Path], dict[str, Path]]:
+    """Scan the model folder once and index its textures by lowercase stem.
+
+    The old code globbed the folder four times per texture, which on a fighter
+    with ~50 textures meant a couple hundred redundant directory scans.
+    """
+    nutexb_paths: dict[str, Path] = {}
+    png_paths: dict[str, Path] = {}
+    try:
+        entries = list(os.scandir(model_dir))
+    except OSError:
+        return nutexb_paths, png_paths
+    for entry in entries:
+        name = entry.name.lower()
+        if name.endswith('.nutexb'):
+            nutexb_paths.setdefault(name[:-len('.nutexb')], Path(entry.path))
+        elif name.endswith('.png'):
+            png_paths.setdefault(name[:-len('.png')], Path(entry.path))
+    return nutexb_paths, png_paths
+
+
 def get_matching_nutexb_path(texture_name: str, model_dir: Path) -> Path | None:
-    lower_case_nutexb_file_name = texture_name.lower() + ".nutexb"
-    for nutexb_file_path in Path(model_dir).glob("*.nutexb"):
-        if nutexb_file_path.name.lower() == lower_case_nutexb_file_name:
-            return nutexb_file_path
-    return None
+    return _index_model_dir(Path(model_dir))[0].get(texture_name.lower())
+
 
 def get_matching_png_path(texture_name: str, model_dir: Path) -> Path | None:
-    lower_case_png_file_name = texture_name.lower() + ".png"
-    for png_file_path in Path(model_dir).glob("*.png"):
-        if png_file_path.name.lower() == lower_case_png_file_name:
-            return png_file_path
-    return None
+    return _index_model_dir(Path(model_dir))[1].get(texture_name.lower())
 
-def import_texture_to_blender(operator: bpy.types.Operator, texture_name: str, model_dir: Path) -> bpy.types.Image:
-    '''
-    In order for users to be able to export and re-load from the same folder, the priority will be .nutexb, then .png
+
+def _convert_nutexb_files(conversions: list[tuple[str, Path, Path]]) -> dict[str, Exception]:
+    """Run ultimate_tex_cli over every texture at once.
+
+    Each conversion is its own external process, so the work is dominated by
+    process startup and disk IO rather than the GIL. Converting them one at a
+    time was by far the largest cost of importing a model.
+    """
+    results: dict[str, Exception] = {}
+    if not conversions:
+        return results
+    if len(conversions) == 1:
+        texture_name, nutexb_path, png_path = conversions[0]
+        try:
+            convert_nutexb_to_png(nutexb_path, png_path)
+        except Exception as e:
+            results[texture_name] = e
+        return results
+
+    max_workers = min(len(conversions), (os.cpu_count() or 4) * 2, 16)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(convert_nutexb_to_png, nutexb_path, png_path): texture_name
+            for texture_name, nutexb_path, png_path in conversions
+        }
+        for future in as_completed(futures):
+            texture_name = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                results[texture_name] = e
+    return results
+
+
+def import_texture_to_blender(operator: bpy.types.Operator, texture_name: str, model_dir: Path,
+                              nutexb_paths: dict[str, Path] = None,
+                              png_paths: dict[str, Path] = None,
+                              conversion_errors: dict[str, Exception] = None,
+                              temp_png_paths: dict[str, Path] = None) -> bpy.types.Image:
+    '''In order for users to be able to export and re-load from the same folder, the priority will be .nutexb, then .png
+
+    The nutexb -> png conversions happen up front in import_material_images so they
+    can run in parallel; this just consumes their results.
     '''
     # Check if the image being referenced is a default image
     default_texture_names: set[str] = set(generated_default_texture_name_value.keys())
     if texture_name.lower() in default_texture_names:
         # Default textures were just generated, so they should be in the .blend already
         return bpy.data.images[texture_name.lower()]
-    
+
+    if nutexb_paths is None or png_paths is None:
+        nutexb_paths, png_paths = _index_model_dir(Path(model_dir))
+        if temp_png_paths is None:
+            # Called outside the batch path, so do this one conversion here.
+            nutexb_path = nutexb_paths.get(texture_name.lower())
+            temp_png_paths = {}
+            conversion_errors = {}
+            if nutexb_path is not None:
+                temp_png_paths[texture_name] = Path(model_dir) / (texture_name + "_temp.png")
+                conversion_errors = _convert_nutexb_files(
+                    [(texture_name, nutexb_path, temp_png_paths[texture_name])]
+                )
+    conversion_errors = conversion_errors or {}
+    temp_png_paths = temp_png_paths or {}
+
     # The image wasn't a default image, so will need to create the new image
     image = bpy.data.images.new(texture_name, 8, 8) # Ignore the x/y values here, its just because the new image is of type "Generated" before we change it to "File"
     image.name = texture_name
     #image.type = 'FILE' # Its read-only
     image.source = 'FILE'
 
-    # Debug: Print what directory is being searched and what files are found
-    operator.report({"INFO"}, f"Searching for texture '{texture_name}' in directory: {model_dir}")
-    nutexb_files = list(Path(model_dir).glob("*.nutexb"))
-    png_files = list(Path(model_dir).glob("*.png"))
-    operator.report({"INFO"}, f"Found {len(nutexb_files)} .nutexb files and {len(png_files)} .png files in directory")
-    if nutexb_files:
-        operator.report({"INFO"}, f".nutexb files: {[f.name for f in nutexb_files]}")
-    if png_files:
-        operator.report({"INFO"}, f".png files: {[f.name for f in png_files]}")
+    matching_nutexb_path = nutexb_paths.get(texture_name.lower())
+    matching_png_path = png_paths.get(texture_name.lower())
 
-    matching_nutexb_path = get_matching_nutexb_path(texture_name, model_dir)
-    matching_png_path = get_matching_png_path(texture_name, model_dir)
+    def use_converted_png() -> bool:
+        '''Pack the freshly converted png, returning False if the conversion failed.'''
+        temp_png_file_path = temp_png_paths.get(texture_name)
+        if temp_png_file_path is None or texture_name in conversion_errors:
+            return False
+        image.filepath = str(temp_png_file_path)
+        image.pack()
+        try:
+            temp_png_file_path.unlink()
+        except Exception as e:
+            operator.report({"WARNING"}, f"Failed to remove temporary png file `{temp_png_file_path.name}`, error=`{e}`")
+        return True
+
     match (matching_nutexb_path is not None, matching_png_path is not None):
         case (True, True):
-            operator.report({"INFO"}, f"Both a .nutexb and a .png were found for texture `{texture_name}`. The import priority will be nutexb if possible, followed by the png.")
-            try:
-                temp_png_file_path = Path(model_dir) / (texture_name + "_temp.png")
-                convert_nutexb_to_png(matching_nutexb_path, temp_png_file_path)
-            except CalledProcessError as e:
-                operator.report({"INFO"}, f"Failed to convert .nutexb `{matching_nutexb_path.name}` to PNG, but the .PNG was available so that will be used instead. Error=`{e.stderr}`")
+            if not use_converted_png():
+                error = conversion_errors.get(texture_name)
+                operator.report({"INFO"}, f"Failed to convert .nutexb `{matching_nutexb_path.name}` to PNG, but the .PNG was available so that will be used instead. Error=`{error}`")
                 image.filepath = str(matching_png_path)
                 # The image wont be packed since its an existing external file.
-            else:
-                image.filepath = str(temp_png_file_path)
-                image.pack()
-                try:
-                    temp_png_file_path.unlink()
-                except Exception as e:
-                    operator.report({"WARNING"}, f"Failed to remove temporary png file `{temp_png_file_path.name}`, error=`{e}`")
         case (True, False):
-            try:
-                temp_png_file_path = Path(model_dir) / (texture_name + "_temp.png")
-                convert_nutexb_to_png(matching_nutexb_path, temp_png_file_path)
-            except CalledProcessError as e:
-                operator.report({"WARNING"}, f"Failed to convert .nutexb `{matching_nutexb_path.name}` to PNG, please manually convert the .nutexb to a .png and place it in the folder. Error=`{e.stderr}`")
-            else:
-                image.filepath = str(temp_png_file_path)
-                image.pack()
-                try:
-                    temp_png_file_path.unlink()
-                except Exception as e:
-                    operator.report({"WARNING"}, f"Failed to remove temporary png file `{temp_png_file_path.name}`, error=`{e}`")
+            if not use_converted_png():
+                error = conversion_errors.get(texture_name)
+                operator.report({"WARNING"}, f"Failed to convert .nutexb `{matching_nutexb_path.name}` to PNG, please manually convert the .nutexb to a .png and place it in the folder. Error=`{error}`")
         case (False, True):
             image.filepath = str(matching_png_path)
         case (False, False):
             operator.report({"WARNING"}, f"No .nutexb or .png was found for texture `{texture_name}`! Please include the .nutexb or .png")
-            
+
     return image
 
 def import_material_images(operator: bpy.types.Operator, ssbh_matl: ssbh_data_py.matl_data.MatlData, model_dir:str ) -> dict[str, bpy.types.Image]:
     texture_name_to_image_dict: dict[str, bpy.types.Image] = {}
     texture_names_in_matl = {tex.data for mat in ssbh_matl.entries for tex in mat.textures}
-    
+
+    model_dir_path = Path(model_dir)
+    nutexb_paths, png_paths = _index_model_dir(model_dir_path)
+    default_texture_names: set[str] = set(generated_default_texture_name_value.keys())
+
+    # Convert every .nutexb we need up front so the external converter processes
+    # run concurrently instead of one blocking call per texture.
+    conversions: list[tuple[str, Path, Path]] = []
+    temp_png_paths: dict[str, Path] = {}
     for texture_name in texture_names_in_matl:
-        texture_name_to_image_dict[texture_name] = import_texture_to_blender(operator, texture_name, Path(model_dir))
+        if texture_name.lower() in default_texture_names:
+            continue
+        nutexb_path = nutexb_paths.get(texture_name.lower())
+        if nutexb_path is None:
+            continue
+        temp_png_file_path = model_dir_path / (texture_name + "_temp.png")
+        temp_png_paths[texture_name] = temp_png_file_path
+        conversions.append((texture_name, nutexb_path, temp_png_file_path))
+
+    conversion_errors = _convert_nutexb_files(conversions)
+
+    for texture_name in texture_names_in_matl:
+        texture_name_to_image_dict[texture_name] = import_texture_to_blender(
+            operator, texture_name, model_dir_path,
+            nutexb_paths, png_paths, conversion_errors, temp_png_paths,
+        )
 
     return texture_name_to_image_dict
 

@@ -1,6 +1,7 @@
 import bpy
 from bpy.types import Panel
 
+from .battlefield_ref import COLLECTION_NAME as BF_COLLECTION_NAME
 from .light_nuanmb import find_stage_light_objects
 from .shpcanim import find_shpc_mesh, find_shpc_root
 
@@ -99,3 +100,26 @@ class SUB_PT_stage_tools(Panel):
                     box.label(text="Vertex-paint Col to edit local ambient.")
                     box.label(text="Enable Export Painted Ambient before export.")
             box.label(text="Intensity and tint affect the whole grid.")
+
+        box = layout.box()
+        header = box.row()
+        header.prop(
+            ssp,
+            "stage_bf_ref_expanded",
+            icon="TRIA_DOWN" if ssp.stage_bf_ref_expanded else "TRIA_RIGHT",
+            icon_only=True,
+            emboss=False,
+        )
+        header.label(text="Battlefield Reference")
+        if ssp.stage_bf_ref_expanded:
+            box.operator("sub.import_battlefield_reference", icon="IMPORT")
+            existing = [
+                collection
+                for collection in bpy.data.collections
+                if collection.name.startswith(BF_COLLECTION_NAME)
+            ]
+            if existing:
+                box.label(text=f"{len(existing)} reference stage(s) in the scene")
+            box.label(text="Enter the scale your fighter is set to in code.")
+            box.label(text="The stage is scaled by the inverse of it.")
+            box.label(text="Reference geometry only, do not export it.")

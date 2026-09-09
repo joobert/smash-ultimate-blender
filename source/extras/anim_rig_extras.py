@@ -87,6 +87,14 @@ def _draw_ik_fk_switch_rows(layout, arm):
         op.limbs = kind
         op.set_enabled = True
         op.enable_ik = enable_ik
+    if arm.data.get('sub_independent_ik'):
+        row = layout.row(align=True)
+        if has_arms:
+            row.operator('sub.key_ik_stretch', text='IK Stretch Arms',
+                         depress=arm.data.sub_ik_stretch_arms).limbs = 'ARMS'
+        if has_legs:
+            row.operator('sub.key_ik_stretch', text='IK Stretch Legs',
+                         depress=arm.data.sub_ik_stretch_legs).limbs = 'LEGS'
     if animation_needs_ik_match(arm):
         row = layout.row(align=True)
         row.operator(

@@ -14,8 +14,9 @@ from pathlib import Path
 from ...dependencies import ssbh_data_py
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty, FloatProperty, EnumProperty
-from bpy.types import Operator, Panel
+from bpy.types import Operator, Panel, Menu
 from mathutils import Matrix, Quaternion, Vector
+from ..import_paths import walk_import_folders
 from ..model.import_model import get_blender_transform
 from ..blender_compat import assign_action, draw_progress, ensure_action_slot
 from ..addon_preferences import format_animation_name_on_import
@@ -41,8 +42,21 @@ ANIM_FOLDER_KEY = "sub_anim_import_folder"
 _last_anim_sync_ptr = 0
 
 
+def remember_animation_folder(ssp, folder):
+    if not folder:
+        return
+    folder = os.path.normpath(bpy.path.abspath(str(folder)))
+    key = os.path.normcase(folder)
+    if not any(os.path.normcase(item.path) == key for item in ssp.animation_import_folders):
+        item = ssp.animation_import_folders.add()
+        item.path = folder
+
+
 def fill_animation_import_list(ssp, folder):
+    remember_animation_folder(ssp, ssp.animation_import_folder_path)
+    remember_animation_folder(ssp, folder)
     ssp.animation_import_files.clear()
+    ssp.animation_import_files_index = 0
     if not folder or not os.path.isdir(folder):
         ssp.animation_import_folder_path = folder or ""
         return 0
@@ -159,39 +173,65 @@ def import_animation_file(
         except Exception:
             pass
 
-    if filepath.lower().endswith(RAW_ANIM_EXTENSION):
-        if obj.type != 'ARMATURE':
+    is_raw = filepath.lower().endswith(RAW_ANIM_EXTENSION)
+    if obj.type != 'ARMATURE':
+        if is_raw:
             operator.report({'ERROR'}, 'Raw animation import requires an armature.')
             return False
-        old_mode = context.mode
-        if old_mode != 'POSE':
+        import_camera_anim(operator, context, filepath, first_frame)
+        refresh_smash_viewport()
+        return True
+
+    from ..extras import create_animation_rig as rig
+    context.view_layer.update()
+    evaluated = obj.evaluated_get(context.evaluated_depsgraph_get())
+    active_limbs = [kind for kind in ('ARMS', 'LEGS')
+                    if rig.armature_has_ik(obj, kind)
+                    and rig.armature_ik_is_enabled(evaluated, kind)]
+    old_mode = obj.mode
+    old_auto_key = context.scene.tool_settings.use_keyframe_insert_auto
+    try:
+        context.scene.tool_settings.use_keyframe_insert_auto = False
+        if obj.mode != 'POSE':
             bpy.ops.object.mode_set(mode='POSE', toggle=False)
-        success = import_raw_animation(context, obj, filepath, operator)
-        if context.mode != old_mode:
-            bpy.ops.object.mode_set(mode=old_mode, toggle=False)
+        if is_raw:
+            success = import_raw_animation(context, obj, filepath, operator)
+        else:
+            import_model_anim(
+                context, filepath, include_transform, include_material,
+                include_visibility, first_frame, armature_object=obj,
+            )
+            success = True
+        if success and active_limbs and (is_raw or include_transform):
+            _refresh_imported_ik(context, obj, active_limbs, preserve_controls=is_raw)
         if success:
             refresh_smash_viewport()
         return success
-
-    if obj.type == 'ARMATURE':
-        old_mode = context.mode
-        if old_mode != 'POSE':
-            bpy.ops.object.mode_set(mode='POSE', toggle=False)
-        import_model_anim(
-            context,
-            filepath,
-            include_transform,
-            include_material,
-            include_visibility,
-            first_frame,
-            armature_object=obj,
-        )
-        if context.mode != old_mode:
+    finally:
+        context.scene.tool_settings.use_keyframe_insert_auto = old_auto_key
+        if obj.mode != old_mode:
             bpy.ops.object.mode_set(mode=old_mode, toggle=False)
-    else:
-        import_camera_anim(operator, context, filepath, first_frame)
-    refresh_smash_viewport()
-    return True
+
+
+def _refresh_imported_ik(context, obj, active_limbs, *, preserve_controls=False):
+    """Match new FK motion for enabled limbs without overwriting raw IK edits."""
+    from ..extras import create_animation_rig as rig, ik_channels, anim_layers_compat
+    from .fcurve_compat import get_fcurves_for_assigned_slot
+
+    paths = {fc.data_path for fc in get_fcurves_for_assigned_slot(obj)} if preserve_controls else set()
+    with anim_layers_compat.anim_layers_paused():
+        for kind in active_limbs:
+            controls = [obj.pose.bones[name].path_from_id() + '.'
+                        for _, _, target, pole in ik_channels.chains(obj, kind)
+                        for name in (target, pole)]
+            if paths and any(path.startswith(tuple(controls)) for path in paths):
+                # Raw clips carry their own IK controls and switch animation.
+                continue
+            ik_channels.match(context, obj, kind, entire=True, key=True)
+            rig._key_use_ik(obj, context.scene.frame_start, limbs=kind, enabled=True)
+            rig._set_ik_enabled(context, obj, True, limbs=kind)
+        context.scene.frame_set(context.scene.frame_current)
+        context.view_layer.update()
 
 
 def import_animation_paths(context, operator, filepaths):
@@ -258,11 +298,19 @@ def import_animation_paths(context, operator, filepaths):
 
 class SUB_UL_animation_import_list(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.operator_context = 'INVOKE_DEFAULT'
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            checkbox = layout.operator(
+                SUB_OP_toggle_animation_import_selection.bl_idname,
+                text="", icon='CHECKBOX_HLT' if item.selected else 'CHECKBOX_DEHLT',
+                emboss=False,
+            )
+            checkbox.index = index
+            checkbox.toggle = True
             op = layout.operator(
                 SUB_OP_toggle_animation_import_selection.bl_idname,
                 text=item.name,
-                icon='CHECKBOX_HLT' if item.selected else 'CHECKBOX_DEHLT',
+                icon='ACTION',
                 depress=item.selected,
             )
             op.index = index
@@ -283,6 +331,7 @@ class SUB_OP_toggle_animation_import_selection(Operator):
     bl_options = {'INTERNAL'}
 
     index: IntProperty(options={'HIDDEN'})
+    toggle: BoolProperty(default=False, options={'HIDDEN'})
 
     def invoke(self, context, event):
         ssp = context.scene.sub_scene_properties
@@ -290,24 +339,22 @@ class SUB_OP_toggle_animation_import_selection(Operator):
         if self.index < 0 or self.index >= len(items):
             return {'CANCELLED'}
 
-        previous_index = max(0, min(ssp.animation_import_files_index, len(items) - 1))
-        if event.shift:
-            if not event.ctrl:
-                for item in items:
-                    item.selected = False
-            first, last = sorted((previous_index, self.index))
-            for index in range(first, last + 1):
-                items[index].selected = True
-        elif event.ctrl:
-            items[self.index].selected = not items[self.index].selected
-        else:
-            for index, item in enumerate(items):
-                item.selected = index == self.index
-
+        from .selection import select_range
+        ssp.animation_import_selection_anchor = select_range(
+            items, 'selected', self.index, ssp.animation_import_selection_anchor,
+            shift=event.shift, toggle=event.ctrl or event.oskey or (self.toggle and not event.shift),
+        )
         ssp.animation_import_files_index = self.index
         return {'FINISHED'}
 
-    def execute(self, _context):
+    def execute(self, context):
+        from .selection import select_range
+        ssp = context.scene.sub_scene_properties
+        if not 0 <= self.index < len(ssp.animation_import_files):
+            return {'CANCELLED'}
+        ssp.animation_import_selection_anchor = select_range(
+            ssp.animation_import_files, 'selected', self.index, ssp.animation_import_selection_anchor, toggle=self.toggle)
+        ssp.animation_import_files_index = self.index
         return {'FINISHED'}
 
 
@@ -805,9 +852,9 @@ class SUB_PT_import_anim(Panel):
         if obj and obj.select_get() and (obj.type == 'ARMATURE' or obj.type == 'CAMERA'):
             # Add button to browse for an animation folder
             row = layout.row()
-            row.operator(SUB_OP_select_animation_folder.bl_idname, icon='ZOOM_ALL', text='Browse Animation Folder')
+            row.operator(SUB_OP_select_animation_folder.bl_idname, icon='ZOOM_ALL', text='Add Animation Folder')
             
-            if ssp.animation_import_folder_path and len(ssp.animation_import_files) > 0:
+            if ssp.animation_import_folder_path or len(ssp.animation_import_folders) > 0:
                 # Collapsible Related Animations section
                 box = layout.box()
                 header_row = box.row()
@@ -835,7 +882,7 @@ class SUB_PT_import_anim(Panel):
                     
                     if ssp.animation_import_folder_path:
                         row = box.row()
-                        row.label(text=f"Folder: {ssp.animation_import_folder_path}")
+                        row.menu(SUB_MT_animation_folders.bl_idname, text=f"Folder: {ssp.animation_import_folder_path}")
                     
                     row = box.row()
                     row.template_list(
@@ -848,9 +895,10 @@ class SUB_PT_import_anim(Panel):
                         rows=5,
                     )
 
+                    box.label(text="Checkboxes include animations independently")
                     help_row = box.row()
                     help_row.scale_y = 0.8
-                    help_row.label(text="Click: one  Ctrl-click: toggle  Shift-click: range", icon='INFO')
+                    help_row.label(text="Name: select  Ctrl: toggle  Shift: range", icon='INFO')
 
                     row = box.row(align=True)
                     op = row.operator(SUB_OP_select_all_animation_imports.bl_idname, text="Select All")
@@ -1050,6 +1098,12 @@ class SUB_OP_import_anim(Operator):
 def poll_cameras(self, obj):
     return obj.type == 'CAMERA'
 
+# Smash is Y-up / X-major, Blender is Z-up / Y-major. These never change, so
+# build them once instead of once per root-bone keyframe.
+_Y_UP_TO_Z_UP = Matrix.Rotation(math.radians(90), 4, 'X')
+_X_MAJOR_TO_Y_MAJOR = Matrix.Rotation(math.radians(-90), 4, 'Z')
+
+
 def hierarchy_order(bone, reordered):
         if bone not in reordered:
             reordered.append(bone)
@@ -1064,36 +1118,46 @@ def get_hierarchy_order(bone_list: list[bpy.types.PoseBone]) -> list[bpy.types.P
     return root_bones + [c for root_bone in root_bones for c in root_bone.children_recursive if c in bone_list]
 
 class BoneTranslationFCurves():
+    # Keyframe values are stashed as one flat [frame, value, frame, value, ...]
+    # list per channel, which is exactly what FCurve.foreach_set('co') wants.
+    # Building per-keyframe pair lists and flattening them at the end allocated
+    # millions of tiny lists on a full-length animation.
     def __init__(self, action, bone_name, values_length):
         self.data_path = f'pose.bones["{bone_name}"].location'
         self.x: bpy.types.FCurve = create_fcurve(action, 'OBJECT', self.data_path, 0, f'{bone_name}')
         self.y: bpy.types.FCurve = create_fcurve(action, 'OBJECT', self.data_path, 1, f'{bone_name}')
         self.z: bpy.types.FCurve = create_fcurve(action, 'OBJECT', self.data_path, 2, f'{bone_name}')
-        self.x_stashed_values = [[0.0, 0.0]] * values_length
-        self.y_stashed_values = [[0.0, 0.0]] * values_length
-        self.z_stashed_values = [[0.0, 0.0]] * values_length
+        self.values_length = values_length
+        self.x_stashed_values = [0.0] * (values_length * 2)
+        self.y_stashed_values = [0.0] * (values_length * 2)
+        self.z_stashed_values = [0.0] * (values_length * 2)
     def get_translation_matrix(self, index: int):
-        if index < len(self.x.keyframe_points):
-            x = self.x_stashed_values[index][1]
-            y = self.y_stashed_values[index][1]
-            z = self.z_stashed_values[index][1]
-        else:
-            x = self.x_stashed_values[0][1]
-            y = self.y_stashed_values[0][1]
-            z = self.z_stashed_values[0][1]
-        return Matrix.Translation([x,y,z])
+        if index >= len(self.x.keyframe_points):
+            index = 0
+        offset = index * 2 + 1
+        return Matrix.Translation([self.x_stashed_values[offset],
+                                   self.y_stashed_values[offset],
+                                   self.z_stashed_values[offset]])
     def stash_keyframe_set_from_vector(self, index, frame, translation_vector: Vector):
         x, y, z = translation_vector
-        self.x_stashed_values[index] = [frame, x]
-        self.y_stashed_values[index] = [frame, y]
-        self.z_stashed_values[index] = [frame, z]
+        offset = index * 2
+        xs = self.x_stashed_values
+        ys = self.y_stashed_values
+        zs = self.z_stashed_values
+        xs[offset] = frame
+        xs[offset + 1] = x
+        ys[offset] = frame
+        ys[offset + 1] = y
+        zs[offset] = frame
+        zs[offset + 1] = z
     def set_keyframe_values_from_stash(self):
-        self.x.keyframe_points.add(count=len(self.x_stashed_values))
-        self.y.keyframe_points.add(count=len(self.y_stashed_values))
-        self.z.keyframe_points.add(count=len(self.z_stashed_values))
-        self.x.keyframe_points.foreach_set('co', [x for tup in self.x_stashed_values for x in tup])
-        self.y.keyframe_points.foreach_set('co', [x for tup in self.y_stashed_values for x in tup])
-        self.z.keyframe_points.foreach_set('co', [x for tup in self.z_stashed_values for x in tup])
+        count = self.values_length
+        self.x.keyframe_points.add(count=count)
+        self.y.keyframe_points.add(count=count)
+        self.z.keyframe_points.add(count=count)
+        self.x.keyframe_points.foreach_set('co', self.x_stashed_values)
+        self.y.keyframe_points.foreach_set('co', self.y_stashed_values)
+        self.z.keyframe_points.foreach_set('co', self.z_stashed_values)
 
 class BoneRotationFCurves():
     def __init__(self, action, base_data_path, bone_name, values_length):
@@ -1101,69 +1165,83 @@ class BoneRotationFCurves():
         self.x: bpy.types.FCurve = create_fcurve(action, 'OBJECT', f'{base_data_path}.rotation_quaternion', 1, f'{bone_name}')
         self.y: bpy.types.FCurve = create_fcurve(action, 'OBJECT', f'{base_data_path}.rotation_quaternion', 2, f'{bone_name}')
         self.z: bpy.types.FCurve = create_fcurve(action, 'OBJECT', f'{base_data_path}.rotation_quaternion', 3, f'{bone_name}')
-        self.w_stashed_values = [[0.0, 0.0]] * values_length
-        self.x_stashed_values = [[0.0, 0.0]] * values_length
-        self.y_stashed_values = [[0.0, 0.0]] * values_length
-        self.z_stashed_values = [[0.0, 0.0]] * values_length
+        self.values_length = values_length
+        self.w_stashed_values = [0.0] * (values_length * 2)
+        self.x_stashed_values = [0.0] * (values_length * 2)
+        self.y_stashed_values = [0.0] * (values_length * 2)
+        self.z_stashed_values = [0.0] * (values_length * 2)
     def get_rotation_matrix(self, index: int):
-        if index < len(self.w.keyframe_points):
-            w = self.w_stashed_values[index][1]
-            x = self.x_stashed_values[index][1]
-            y = self.y_stashed_values[index][1]
-            z = self.z_stashed_values[index][1]
-        else:
-            w = self.w_stashed_values[0][1]
-            x = self.x_stashed_values[0][1]
-            y = self.y_stashed_values[0][1]
-            z = self.z_stashed_values[0][1]           
-        q = Quaternion([w,x,y,z])
+        if index >= len(self.w.keyframe_points):
+            index = 0
+        offset = index * 2 + 1
+        q = Quaternion([self.w_stashed_values[offset],
+                        self.x_stashed_values[offset],
+                        self.y_stashed_values[offset],
+                        self.z_stashed_values[offset]])
         return Matrix.Rotation(q.angle, 4, q.axis)
     def stash_keyframe_values_from_quaternion(self, index, frame, quaternion: Quaternion):
-        w,x,y,z = quaternion
-        self.w_stashed_values[index] = [frame, w]
-        self.x_stashed_values[index] = [frame, x]
-        self.y_stashed_values[index] = [frame, y]
-        self.z_stashed_values[index] = [frame, z]
+        w, x, y, z = quaternion
+        offset = index * 2
+        ws = self.w_stashed_values
+        xs = self.x_stashed_values
+        ys = self.y_stashed_values
+        zs = self.z_stashed_values
+        ws[offset] = frame
+        ws[offset + 1] = w
+        xs[offset] = frame
+        xs[offset + 1] = x
+        ys[offset] = frame
+        ys[offset + 1] = y
+        zs[offset] = frame
+        zs[offset + 1] = z
     def set_keyframe_values_from_stash(self):
-        self.w.keyframe_points.add(count=len(self.w_stashed_values))
-        self.x.keyframe_points.add(count=len(self.x_stashed_values))
-        self.y.keyframe_points.add(count=len(self.y_stashed_values))
-        self.z.keyframe_points.add(count=len(self.z_stashed_values))
-        self.w.keyframe_points.foreach_set('co', [x for tup in self.w_stashed_values for x in tup])
-        self.x.keyframe_points.foreach_set('co', [x for tup in self.x_stashed_values for x in tup])
-        self.y.keyframe_points.foreach_set('co', [x for tup in self.y_stashed_values for x in tup])
-        self.z.keyframe_points.foreach_set('co', [x for tup in self.z_stashed_values for x in tup])
+        count = self.values_length
+        self.w.keyframe_points.add(count=count)
+        self.x.keyframe_points.add(count=count)
+        self.y.keyframe_points.add(count=count)
+        self.z.keyframe_points.add(count=count)
+        self.w.keyframe_points.foreach_set('co', self.w_stashed_values)
+        self.x.keyframe_points.foreach_set('co', self.x_stashed_values)
+        self.y.keyframe_points.foreach_set('co', self.y_stashed_values)
+        self.z.keyframe_points.foreach_set('co', self.z_stashed_values)
 
 class BoneScaleFCurves():
     def __init__(self, action, base_data_path, bone_name, values_length):
         self.x: bpy.types.FCurve = create_fcurve(action, 'OBJECT', f'{base_data_path}.scale', 0, f'{bone_name}')
         self.y: bpy.types.FCurve = create_fcurve(action, 'OBJECT', f'{base_data_path}.scale', 1, f'{bone_name}')
         self.z: bpy.types.FCurve = create_fcurve(action, 'OBJECT', f'{base_data_path}.scale', 2, f'{bone_name}')
-        self.x_stashed_values = [[0.0, 0.0]] * values_length
-        self.y_stashed_values = [[0.0, 0.0]] * values_length
-        self.z_stashed_values = [[0.0, 0.0]] * values_length
+        self.values_length = values_length
+        self.x_stashed_values = [0.0] * (values_length * 2)
+        self.y_stashed_values = [0.0] * (values_length * 2)
+        self.z_stashed_values = [0.0] * (values_length * 2)
     def get_scale_matrix(self, index: int):
-        if index < len(self.x.keyframe_points):
-            x = self.x_stashed_values[index][1]
-            y = self.y_stashed_values[index][1]
-            z = self.z_stashed_values[index][1]
-        else:
-            x = self.x_stashed_values[0][1]
-            y = self.y_stashed_values[0][1]
-            z = self.z_stashed_values[0][1]
-        return Matrix.Diagonal([x,y,z,1.0])
+        if index >= len(self.x.keyframe_points):
+            index = 0
+        offset = index * 2 + 1
+        return Matrix.Diagonal([self.x_stashed_values[offset],
+                                self.y_stashed_values[offset],
+                                self.z_stashed_values[offset],
+                                1.0])
     def stash_keyframe_set_from_vector(self, index, frame, scale_vector: Vector):
         x, y, z = scale_vector
-        self.x_stashed_values[index] = [frame, x]
-        self.y_stashed_values[index] = [frame, y]
-        self.z_stashed_values[index] = [frame, z]
+        offset = index * 2
+        xs = self.x_stashed_values
+        ys = self.y_stashed_values
+        zs = self.z_stashed_values
+        xs[offset] = frame
+        xs[offset + 1] = x
+        ys[offset] = frame
+        ys[offset + 1] = y
+        zs[offset] = frame
+        zs[offset + 1] = z
     def set_keyframe_values_from_stash(self):
-        self.x.keyframe_points.add(count=len(self.x_stashed_values))
-        self.y.keyframe_points.add(count=len(self.y_stashed_values))
-        self.z.keyframe_points.add(count=len(self.z_stashed_values))
-        self.x.keyframe_points.foreach_set('co', [x for tup in self.x_stashed_values for x in tup])
-        self.y.keyframe_points.foreach_set('co', [x for tup in self.y_stashed_values for x in tup])
-        self.z.keyframe_points.foreach_set('co', [x for tup in self.z_stashed_values for x in tup])
+        count = self.values_length
+        self.x.keyframe_points.add(count=count)
+        self.y.keyframe_points.add(count=count)
+        self.z.keyframe_points.add(count=count)
+        self.x.keyframe_points.foreach_set('co', self.x_stashed_values)
+        self.y.keyframe_points.foreach_set('co', self.y_stashed_values)
+        self.z.keyframe_points.foreach_set('co', self.z_stashed_values)
 
 class BoneFCurves():
     def __init__(self, bone_name, action, values_length):
@@ -1179,6 +1257,10 @@ class BoneFCurves():
         return Matrix(tm @ rm @ sm)
     def stash_keyframe_set_from_matrix(self, index, frame, matrix: Matrix):
         t, r, s = matrix.decompose()
+        self.translation.stash_keyframe_set_from_vector(index, frame, t)
+        self.rotation.stash_keyframe_values_from_quaternion(index, frame, r)
+        self.scale.stash_keyframe_set_from_vector(index, frame, s)
+    def stash_keyframe_set_from_components(self, index, frame, t, r, s):
         self.translation.stash_keyframe_set_from_vector(index, frame, t)
         self.rotation.stash_keyframe_values_from_quaternion(index, frame, r)
         self.scale.stash_keyframe_set_from_vector(index, frame, s)
@@ -1224,6 +1306,54 @@ def remove_visibility_drivers_for_armature(armature_object):
         for driver in list(drivers):
             if driver.data_path in {'hide_viewport', 'hide_render'}:
                 drivers.remove(driver)
+
+
+# How close basis_constant @ M has to stay to what Blender itself produces before
+# the shortcut is trusted. Blender keeps pose matrices in single precision, so a
+# small residual is expected on deep bone chains; anything larger means the rig
+# does not satisfy the assumption.
+_BASIS_SHORTCUT_TOLERANCE = 1e-3
+
+
+def _basis_constants(animated) -> dict | None:
+    """Per-bone constant mapping an anim transform to a pose bone's matrix_basis.
+
+    Blender composes a pose as ``pose = parent_pose @ offs_bone @ basis`` where
+    ``offs_bone`` comes from the rest pose. The importer wants
+    ``pose = parent_pose @ M``, so ``basis = offs_bone**-1 @ M`` and the parent's
+    animated pose cancels out entirely. Probing each bone once with ``M`` set to
+    the identity recovers ``offs_bone**-1``, after which every keyframe is a single
+    matrix multiply instead of a write and two reads across the Blender API.
+
+    That identity does not hold for bones that disable rotation inheritance or use
+    a non-default inherit_scale, so each bone is checked against Blender's own
+    answer and None is returned if any bone disagrees, leaving the caller on the
+    original path.
+    """
+    constants = {}
+    for bone, _values, _count, _parent_values, _flags, _fcurves, parent in animated:
+        if parent is None:
+            bone.matrix = Matrix.Identity(4)
+        else:
+            bone.matrix = parent.matrix
+        constants[bone] = bone.matrix_basis.copy()
+
+    # Verify with a transform that exercises rotation, translation and scale
+    # rather than the identity the constants were read from.
+    probe = Matrix.Translation((0.25, -0.5, 0.75)) @ Matrix.Rotation(0.7, 4, 'Y') @ Matrix.Diagonal((1.3, 0.8, 1.1, 1.0))
+    for bone, _values, _count, _parent_values, _flags, _fcurves, parent in animated:
+        if parent is None:
+            bone.matrix = probe
+        else:
+            bone.matrix = parent.matrix @ probe
+        expected = bone.matrix_basis
+        predicted = constants[bone] @ probe
+        for row in range(4):
+            for column in range(4):
+                if abs(expected[row][column] - predicted[row][column]) > _BASIS_SHORTCUT_TOLERANCE:
+                    return None
+
+    return constants
 
 
 def import_model_anim(context: bpy.types.Context, filepath: str,
@@ -1274,51 +1404,101 @@ def import_model_anim(context: bpy.types.Context, filepath: str,
         reordered: list[bpy.types.PoseBone] = get_hierarchy_order(list(bones)) # Do this to gaurantee we never process a child before its parent
         bone_to_fcurves = {b:BoneFCurves(b.name, bone_action, len(n.tracks[0].values)) for b,n in bone_to_node.items()} # only create fcurves for animated bones
 
+        # Hoist everything that doesn't change per frame out of the inner loop.
+        # `node.tracks[0].values` crosses the ssbh_data_py boundary on every access,
+        # and this loop runs once per animated bone per frame.
+        animated: list[tuple] = []
+        for bone in reordered:
+            node = bone_to_node.get(bone)
+            # Some bones may not be animated, but their children may be.
+            if node is None:
+                continue
+            track = node.tracks[0]
+            values = track.values
+            flags = track.transform_flags
+            parent_values = None
+            if track.compensate_scale and bone.parent is not None:
+                parent_node = bone_to_node.get(bone.parent)
+                if parent_node is not None:
+                    parent_values = parent_node.tracks[0].values
+            animated.append((
+                bone,
+                values,
+                len(values),
+                parent_values,
+                flags,
+                bone_to_fcurves[bone],
+                bone.parent,
+            ))
+
         # Reset all bones to rest pose before importing this animation
         reset_bones_to_rest_pose(arma)
-        smash_pose_cache = {}
 
-        for index, frame in enumerate(range(scene.frame_start, scene.frame_end + 1)): # +1 because range() excludes the final value
-            for bone in reordered:
-                node = bone_to_node.get(bone)
-                # Some bones may not be animated, but their children may be.
-                if node is None: 
-                    continue
+        basis_constants = _basis_constants(animated)
 
-                # Bones either have a value on the first frame or every frame.
-                if index >= len(node.tracks[0].values): 
-                    continue 
+        if basis_constants is None:
+            # Rest-pose shortcut rejected for this rig; drive the pose through
+            # Blender one bone-frame at a time as before.
+            for index, frame in enumerate(range(scene.frame_start, scene.frame_end + 1)): # +1 because range() excludes the final value
+                for bone, values, value_count, parent_values, flags, bone_fcurves, parent in animated:
+                    # Bones either have a value on the first frame or every frame.
+                    if index >= value_count:
+                        continue
 
-                smash_value = node.tracks[0].values[index]
-                smash_pose_cache.setdefault(str(int(frame)), {})[bone.name] = {
-                    "translation": list(smash_value.translation),
-                    "rotation": list(smash_value.rotation),
-                    "scale": list(smash_value.scale),
-                }
+                    raw_matrix = get_raw_matrix(values[index], parent_values, index)
 
-                raw_matrix = get_raw_matrix(bone_to_node, bone, index, node)
+                    if parent is None:
+                        # The root bone
+                        bone.matrix = _Y_UP_TO_Z_UP @ raw_matrix @ _X_MAJOR_TO_Y_MAJOR
 
-                bone_fcurves = bone_to_fcurves[bone]
-                if bone.parent is None:
-                    # The root bone
-                    y_up_to_z_up = Matrix.Rotation(math.radians(90), 4, 'X')
-                    x_major_to_y_major = Matrix.Rotation(math.radians(-90), 4, 'Z')
-                    bone.matrix = y_up_to_z_up @ raw_matrix @ x_major_to_y_major
+                        bone_fcurves.stash_keyframe_set_from_matrix(index, frame, bone.matrix_basis)
+                    else:
+                        # The anim transform is relative to the parent bone's animated world transform.
+                        bone.matrix = parent.matrix @ get_blender_transform(raw_matrix).transposed()
 
-                    bone_fcurves.stash_keyframe_set_from_matrix(index, frame, bone.matrix_basis)
-                else:
-                    # The anim transform is relative to the parent bone's animated world transform.
-                    bone.matrix = bone.parent.matrix @ get_blender_transform(raw_matrix).transposed()
+                        # Matrix basis is the transform set for the pose bone by the user.
+                        # The fcurves work on these user configurable values.
+                        # Always goes through apply_transform_flags: the decompose /
+                        # recompose it does normalizes the matrix, so skipping it when
+                        # no override flag is set would change the imported values.
+                        matrix_basis = apply_transform_flags(bone.matrix_basis, flags)
 
-                    # Matrix basis is the transform set for the pose bone by the user.
-                    # The fcurves work on these user configurable values.
-                    matrix_basis = apply_transform_flags(bone.matrix_basis, node.tracks[0].transform_flags)
+                        bone_fcurves.stash_keyframe_set_from_matrix(index, frame, matrix_basis)
+        else:
+            # matrix_basis is basis_constant @ (the anim transform), so no bone
+            # needs its parent's pose and nothing has to round trip through Blender.
+            for index, frame in enumerate(range(scene.frame_start, scene.frame_end + 1)): # +1 because range() excludes the final value
+                for bone, values, value_count, parent_values, flags, bone_fcurves, parent in animated:
+                    # Bones either have a value on the first frame or every frame.
+                    if index >= value_count:
+                        continue
+
+                    raw_matrix = get_raw_matrix(values[index], parent_values, index)
+                    basis_constant = basis_constants[bone]
+
+                    if parent is None:
+                        # The root bone
+                        matrix_basis = basis_constant @ _Y_UP_TO_Z_UP @ raw_matrix @ _X_MAJOR_TO_Y_MAJOR
+                    else:
+                        # The anim transform is relative to the parent bone's animated world transform.
+                        matrix_basis = basis_constant @ get_blender_transform(raw_matrix).transposed()
+
+                        # Matrix basis is the transform set for the pose bone by the user.
+                        # The fcurves work on these user configurable values.
+                        # Always goes through apply_transform_flags: the decompose /
+                        # recompose it does normalizes the matrix, so skipping it when
+                        # no override flag is set would change the imported values.
+                        bone_fcurves.stash_keyframe_set_from_components(
+                            index, frame, *apply_transform_flags_components(matrix_basis, flags)
+                        )
+                        continue
 
                     bone_fcurves.stash_keyframe_set_from_matrix(index, frame, matrix_basis)
 
+            reset_bones_to_rest_pose(arma)
+
         for bone, bone_fcurves in bone_to_fcurves.items():
             bone_fcurves.set_keyframe_values_from_stash()
-        bone_action["sub_smash_pose_cache"] = json.dumps(smash_pose_cache)
 
     visibility_group = name_to_group_dict.get('Visibility') if include_visibility_track else None
     material_group = name_to_group_dict.get('Material') if include_material_track else None
@@ -1503,61 +1683,74 @@ def import_model_anim(context: bpy.types.Context, filepath: str,
         pass
 
 
-def get_raw_matrix(bone_to_node, bone, index, node) -> Matrix:
-    translation = node.tracks[0].values[index].translation
-    rotation = node.tracks[0].values[index].rotation
-    scale = node.tracks[0].values[index].scale
+def get_raw_matrix(value, parent_values, index: int) -> Matrix:
+    """Build the Smash-space matrix for one transform track value.
+
+    `parent_values` is the parent bone's track values when scale compensation
+    applies and None otherwise, so the common no-compensation path skips both
+    the lookup and an identity matrix multiply.
+    """
+    translation = value.translation
+    rotation = value.rotation
+    scale = value.scale
 
     tm = Matrix.Translation(translation)
     qr = Quaternion([rotation[3], rotation[0], rotation[1], rotation[2]])
     rm = Matrix.Rotation(qr.angle, 4, qr.axis)
     # Blender doesn't have this built in for some reason.
     scale_matrix = Matrix.Diagonal((scale[0], scale[1], scale[2], 1.0))
-    compensate_scale = node.tracks[0].compensate_scale
-    scale_compensation = get_scale_compensation(bone_to_node, bone, index, compensate_scale)
 
+    if parent_values is None:
+        return tm @ rm @ scale_matrix
+
+    scale_compensation = get_scale_compensation(parent_values, index)
     return tm @ scale_compensation @ rm @ scale_matrix
 
 
-def get_scale_compensation(bone_to_node, bone, frame, compensate_scale):
-    scale_compensation = Matrix.Diagonal((1.0, 1.0, 1.0, 1.0))
-    if compensate_scale and bone.parent:
-        # Scale compensation "compensates" the effect of the immediate parent's scale.
-        parent_node = bone_to_node.get(bone.parent, None)
-        if parent_node is not None:
-            try:
-                # The parent may not have the same frame count.
-                # Handle the case where the parent has only one frame.
-                if frame >= len(parent_node.tracks[0].values):
-                    parent_scale = parent_node.tracks[0].values[0].scale
-                else:
-                    parent_scale = parent_node.tracks[0].values[frame].scale
-
-                scale_compensation = Matrix.Diagonal((1.0 / parent_scale[0], 1.0 / parent_scale[1], 1.0 / parent_scale[2], 1.0))
-            except IndexError:
-                # TODO: Handle the case when the parent has no animation track?
-                pass
-
-    return scale_compensation
+def get_scale_compensation(parent_values, frame):
+    # Scale compensation "compensates" the effect of the immediate parent's scale.
+    try:
+        # The parent may not have the same frame count.
+        # Handle the case where the parent has only one frame.
+        if frame >= len(parent_values):
+            parent_scale = parent_values[0].scale
+        else:
+            parent_scale = parent_values[frame].scale
+        return Matrix.Diagonal((1.0 / parent_scale[0], 1.0 / parent_scale[1], 1.0 / parent_scale[2], 1.0))
+    except IndexError:
+        # TODO: Handle the case when the parent has no animation track?
+        return Matrix.Identity(4)
 
 
 def apply_transform_flags(matrix_basis: Matrix, transform_flags: ssbh_data_py.anim_data.TransformFlags):
-    # Some tracks override parts of the anim transform.
-    # This allows bones like swing bones to be animated in other ways.
-    mbtv, mbrq, mbsv = matrix_basis.decompose()
-
-    if transform_flags.override_translation:
-        mbtv = [0.0, 0.0, 0.0]
-    if transform_flags.override_rotation:
-        mbrq = Quaternion([1,0,0,0])
-    if transform_flags.override_scale:
-        mbsv = [1.0, 1.0, 1.0]
+    mbtv, mbrq, mbsv = apply_transform_flags_components(matrix_basis, transform_flags)
 
     mbtm = Matrix.Translation(mbtv)
     mbrm = Matrix.Rotation(mbrq.angle, 4, mbrq.axis)
     mbsm = Matrix.Diagonal((mbsv[0], mbsv[1], mbsv[2], 1.0))
 
     return mbtm @ mbrm @ mbsm
+
+
+def apply_transform_flags_components(matrix_basis: Matrix, transform_flags: ssbh_data_py.anim_data.TransformFlags):
+    """The translation / rotation / scale the f-curves want, without the round trip.
+
+    The caller only ever needs these three components, so recomposing them into a
+    matrix here just to decompose it again on the way into the keyframe stash is
+    wasted work on every bone of every frame.
+    """
+    # Some tracks override parts of the anim transform.
+    # This allows bones like swing bones to be animated in other ways.
+    mbtv, mbrq, mbsv = matrix_basis.decompose()
+
+    if transform_flags.override_translation:
+        mbtv = Vector((0.0, 0.0, 0.0))
+    if transform_flags.override_rotation:
+        mbrq = Quaternion([1,0,0,0])
+    if transform_flags.override_scale:
+        mbsv = Vector((1.0, 1.0, 1.0))
+
+    return mbtv, mbrq, mbsv
 
 
 def keyframe_insert_camera_locrotscale(camera, frame):
@@ -1677,6 +1870,10 @@ def setup_visibility_drivers(arma:bpy.types.Object):
         entries_index = entry_indices_by_case.get(true_mesh_name.casefold())
         if entries_index is not None:
             for property in ['hide_viewport', 'hide_render']:
+                # driver_add() returns the existing driver, so without this every
+                # animation import piled another duplicate variable onto the same
+                # driver. Match how setup_material_drivers rebuilds its drivers.
+                mesh.driver_remove(property)
                 driver_handle = mesh.driver_add(property)
                 var = driver_handle.driver.variables.new()
                 var.name = "var"
@@ -1806,82 +2003,72 @@ def update_camera_transforms(camera: bpy.types.Object, transform_group, index, f
     camera.matrix_local = axis_correction @ translation @ rotation @ scale
     keyframe_insert_camera_locrotscale(camera, frame)
 
-class SUB_OP_select_animation_folder(Operator):
-    bl_idname = 'sub.ssbh_animation_folder_selector'
-    bl_label = 'Import Anim Folder'
-    bl_description = 'Choose a folder containing .nuanmb animation files'
+class SUB_MT_animation_folders(Menu):
+    bl_idname = 'SUB_MT_animation_folders'
+    bl_label = 'Animation Folders'
+
+    def draw(self, context):
+        ssp = context.scene.sub_scene_properties
+        paths = [item.path for item in ssp.animation_import_folders]
+        if ssp.animation_import_folder_path and ssp.animation_import_folder_path not in paths:
+            paths.append(ssp.animation_import_folder_path)
+        for path in paths:
+            op = self.layout.operator(
+                SUB_OP_switch_animation_folder.bl_idname, text=path,
+                icon='CHECKMARK' if path == ssp.animation_import_folder_path else 'FILE_FOLDER')
+            op.folder = path
+
+
+class SUB_OP_switch_animation_folder(Operator):
+    bl_idname = 'sub.switch_animation_folder'
+    bl_label = 'Switch Animation Folder'
     bl_options = {'UNDO'}
 
-    filter_glob: StringProperty(
-        default='*.nuanmb',
-        options={'HIDDEN'}
-    )
-    directory: bpy.props.StringProperty(subtype="DIR_PATH")
+    folder: StringProperty(subtype='DIR_PATH')
+
+    def execute(self, context):
+        ssp = context.scene.sub_scene_properties
+        fill_animation_import_list(ssp, self.folder)
+        obj = context.object
+        if obj is not None and obj.type == 'ARMATURE':
+            bind_anim_folder_to_armature(obj, self.folder)
+        return {'FINISHED'}
+
+
+class SUB_OP_select_animation_folder(Operator):
+    bl_idname = 'sub.ssbh_animation_folder_selector'
+    bl_label = 'Add Animation Folder'
+    bl_description = 'Add a folder, including linked folders, containing .nuanmb animations'
+    bl_options = {'UNDO'}
+
+    filter_glob: StringProperty(default='*', options={'HIDDEN'})
+    directory: StringProperty(subtype='DIR_PATH')
 
     def invoke(self, context, _event):
+        self.directory = context.scene.sub_scene_properties.animation_import_folder_path
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
         ssp = context.scene.sub_scene_properties
-        anim_path = Path(self.directory)
-
-        # First, try the direct selected path
-        if anim_path.exists():
-            animation_count = fill_animation_import_list(ssp, str(anim_path))
-
-            if animation_count:
-                self.report({'INFO'}, f'Found {animation_count} animations in: {anim_path}')
-            # If no animations were found, check if we're in a fighter folder
-            elif "fighter" in str(anim_path):
-                # Try to find the structure motion/body/[first subfolder]
-                try:
-                    # First check if this is already a fighter folder
-                    if "motion" in os.listdir(anim_path):
-                        fighter_folder = anim_path
-                    else:
-                        # Try to find the fighter folder (this might be a subfolder)
-                        parts = str(anim_path).split("fighter")
-                        if len(parts) > 1:
-                            fighter_folder = Path(parts[0] + "fighter" + parts[1].split(os.sep)[0])
-                    
-                    motion_folder = fighter_folder / "motion"
-                    
-                    if motion_folder.exists():
-                        body_folder = motion_folder / "body"
-                        
-                        if body_folder.exists():
-                            # Get the first subfolder in body
-                            try:
-                                subfolders = [f for f in os.listdir(body_folder) if os.path.isdir(body_folder / f)]
-                                if subfolders:
-                                    deep_anim_path = body_folder / subfolders[0]
-                                    
-                                    if deep_anim_path.exists():
-                                        deep_animation_count = fill_animation_import_list(ssp, str(deep_anim_path))
-
-                                        if deep_animation_count:
-                                            self.report({'INFO'}, f'Found {deep_animation_count} animations in deep path: {deep_anim_path}')
-                                        else:
-                                            self.report({'INFO'}, f'No animations found in deep path: {deep_anim_path}')
-                            except Exception as e:
-                                self.report({'INFO'}, f'Failed to search in deep animation path: {str(e)}')
-                except Exception as e:
-                    self.report({'INFO'}, f'Failed to find deep animation structure: {str(e)}')
-                
-                if len(ssp.animation_import_files) == 0:
-                    self.report({'INFO'}, f'No animations found in: {anim_path} or deeper structure')
-            else:
-                self.report({'INFO'}, f'No animations found in: {anim_path}')
-        else:
-            fill_animation_import_list(ssp, str(anim_path))
-            self.report({'ERROR'}, f'Animation directory not found: {anim_path}')
-
+        folder = os.path.normpath(bpy.path.abspath(self.directory))
+        if not os.path.isdir(folder):
+            self.report({'ERROR'}, f'Animation directory not found: {folder}')
+            return {'CANCELLED'}
+        folders = []
+        for root, dirs, files in walk_import_folders(folder):
+            if any(name.lower().endswith('.nuanmb') for name in files):
+                folders.append(root)
+                if root == folder:
+                    break
+        for path in folders or [folder]:
+            remember_animation_folder(ssp, path)
+        count = fill_animation_import_list(ssp, folders[0] if folders else folder)
         refresh_raw_animation_import_list(ssp)
-        obj = getattr(context, "object", None)
-        if obj is not None and getattr(obj, "type", "") == "ARMATURE":
+        obj = context.object
+        if obj is not None and obj.type == 'ARMATURE':
             bind_anim_folder_to_armature(obj, ssp.animation_import_folder_path)
-            
+        self.report({'INFO'}, f'Added {len(folders) or 1} folder(s); {count} animations in selected folder')
         return {'FINISHED'}
 
 

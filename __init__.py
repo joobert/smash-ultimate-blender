@@ -4,7 +4,7 @@ bl_info = {
     'category': 'Object',
     'location': 'View 3D > Tool Shelf > Ultimate',
     'description': 'A collection of tools for importing models and animations to smash ultimate.',
-    'version': (4, 4, 0),
+    'version': (4, 5, 0),
     'blender': (4, 4, 0),
     'warning': 'TO REMOVE: First "Disable" the plugin, then restart blender, then you can hit "Remove" to uninstall',
     'doc_url': 'https://github.com/ssbucarlos/smash-ultimate-blender/wiki',
@@ -86,15 +86,14 @@ def register():
     from .source import retargeting
     retargeting.register()
 
-    # Panel presets before the ordering pass: registering them adds the Panel
-    # Presets panel and repairs parent/child hierarchies, and panel_order needs
-    # that settled before it decides which panels are top-level.
+    # Export Doctor owns its own Scene property, so it registers itself.
+    from .source import doctor
+    doctor.register()
+
+    # Last, once every panel exists: Panel Presets owns both sidebar visibility
+    # and sidebar order, and its registration applies the saved layout.
     from .source.extras import panel_presets
     panel_presets.register()
-
-    # Apply the user-defined Ultimate tab order only after every panel exists.
-    from .source.panel_order import apply_saved_order
-    apply_saved_order()
 
     print('Loaded Smash Ultimate Blender Tools!')
 
@@ -110,6 +109,9 @@ def unregister():
     # Unregister panel presets first (restores original panel polls)
     from .source.extras import panel_presets
     panel_presets.unregister()
+
+    from .source import doctor
+    doctor.unregister()
 
     # Unregister retargeting module first (expy_kit integration)
     from .source import retargeting

@@ -1281,22 +1281,6 @@ class ULTIMATE_PT_BindPanel(ui.VIEW3D_PT_BindPanel):
             row.operator("object.ultimate_apply_bind_settings", icon='FILE_REFRESH')
 
 
-class ULTIMATE_PT_BindSettings(Panel):
-    """Legacy duplicate panel. Kept only so addon reload can unregister it."""
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = 'Ultimate'
-    bl_label = "Bind to Active Armature"
-    bl_parent_id = "SUB_PT_retargeting_main"
-
-    @classmethod
-    def poll(cls, context):
-        return False
-
-    def draw(self, context):
-        return
-
-
 class ULTIMATE_PT_ActionsPanel(Panel):
     """Actions panel - contains Binding, Conversion, and Animation operators"""
     bl_space_type = 'VIEW_3D'

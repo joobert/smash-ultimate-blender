@@ -1,5 +1,6 @@
 import os
 import os.path
+from ..import_paths import walk_import_folders
 import re
 import bpy
 import mathutils
@@ -54,7 +55,7 @@ def find_model_folders(root_directory: str) -> list[str]:
         return [root]
 
     found = []
-    for dirpath, dirnames, _filenames in os.walk(root):
+    for dirpath, dirnames, _filenames in walk_import_folders(root):
         if _is_importable_model_folder(dirpath):
             found.append(dirpath)
             dirnames.clear()
@@ -203,7 +204,7 @@ def populate_mods_directory_models(ssp, directory: str) -> int:
 
     ssp.model_import_models.clear()
     count = 0
-    for root, dirs, files in os.walk(directory):
+    for root, dirs, files in walk_import_folders(directory):
         for dir_name in dirs:
             body_folder_path = os.path.join(root, dir_name, "body")
             if os.path.exists(body_folder_path):
@@ -344,7 +345,7 @@ class SUB_OP_select_model_import_folder(Operator):
     bl_options = {'UNDO'}
 
     filter_glob: StringProperty(
-        default='*.numdlb;*.nusktb;*.numshb;*.numatb;*.nuhlpb',
+        default='*',
         options={'HIDDEN'}
     )
     directory: bpy.props.StringProperty(subtype="DIR_PATH")
@@ -557,7 +558,7 @@ class SUB_OP_select_individual_model(Operator):
     bl_options = {'UNDO'}
 
     filter_glob: StringProperty(
-        default='*.numdlb;*.nusktb;*.numshb;*.numatb;*.nuhlpb',
+        default='*',
         options={'HIDDEN'}
     )
     directory: bpy.props.StringProperty(subtype="DIR_PATH")
@@ -804,45 +805,16 @@ def import_model(operator: bpy.types.Operator, context: bpy.types.Context):
         except Exception:
             pass
 
-    # Auto-store predefined idle animations if they exist
-    if len(ssp.animation_import_files) > 0:
-        # Initialize predefined poses list first
-        from ..extras.idle_pose_library import initialize_predefined_poses
-        initialize_predefined_poses(context)
-        
-        # Look for predefined animation files
-        predefined_poses = ["a00wait1", "a05squatwait", "a04fall", "a04fallaerial"]
-        stored_poses = []
-        
-        for pose_name in predefined_poses:
-            idle_anim_path = None
-            for anim_item in ssp.animation_import_files:
-                if anim_item.name == pose_name:
-                    idle_anim_path = anim_item.path
-                    break
-            
-            # If found, automatically store it using the idle pose library
-            if idle_anim_path:
-                # Make sure the armature is selected
-                if armature:
-                    # Select the armature
-                    for obj in bpy.context.selected_objects:
-                        obj.select_set(False)
-                    armature.select_set(True)
-                    context.view_layer.objects.active = armature
-                    
-                    # Store the idle pose
-                    try:
-                        bpy.ops.sub.store_idle_pose(filepath=idle_anim_path)
-                        stored_poses.append(pose_name)
-                    except Exception as e:
-                        operator.report({'WARNING'}, f"Failed to auto-store idle pose {pose_name}: {str(e)}")
-        
-        # Report what was stored
-        if stored_poses:
-            operator.report({'INFO'}, f"Auto-stored idle poses: {', '.join(stored_poses)}")
-        else:
-            operator.report({'INFO'}, "No predefined idle animations found to auto-store")
+    # File-backed idle poses are resolved from the active animation folder on use.
+    from ..extras.idle_pose_library import initialize_predefined_poses
+    initialize_predefined_poses(context)
+
+    if armature is not None:
+        try:
+            from ..extras.collection_presets import auto_apply_model_preset
+            auto_apply_model_preset(context, armature, str(dir), operator)
+        except Exception as error:
+            operator.report({'WARNING'}, f'Collection preset auto-apply failed: {error}')
 
     return {'FINISHED'}
 
@@ -886,20 +858,24 @@ def get_index_from_name(name, bones):
             return index
 
 
+# In Ultimate, the bone's x-axis points from parent to child.
+# In Blender, the bone's y-axis points from parent to child.
+# https://en.wikipedia.org/wiki/Matrix_similarity
+# Built once instead of rebuilt and re-inverted on every call; this runs
+# hundreds of thousands of times during a model or animation import.
+_ULTIMATE_TO_BLENDER_BASIS = Matrix([
+    [0, -1, 0, 0],
+    [1, 0, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1]
+])
+_ULTIMATE_TO_BLENDER_BASIS_INV = _ULTIMATE_TO_BLENDER_BASIS.inverted()
+
+
 def get_blender_transform(m) -> Matrix:
     m = Matrix(m).transposed()
-
-    # In Ultimate, the bone's x-axis points from parent to child.
-    # In Blender, the bone's y-axis points from parent to child.
-    # https://en.wikipedia.org/wiki/Matrix_similarity
-    p = Matrix([
-        [0, -1, 0, 0],
-        [1, 0, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
     # Perform the transformation m in Ultimate's basis and convert back to Blender.
-    return p @ m @ p.inverted()
+    return _ULTIMATE_TO_BLENDER_BASIS @ m @ _ULTIMATE_TO_BLENDER_BASIS_INV
 
 def are_vectors_close(a: mathutils.Vector, b: mathutils.Vector) -> bool:
     return all(math.isclose(a[i], b[i], abs_tol=0.00001) for i in [0,1,2])
@@ -1087,7 +1063,9 @@ def attach_armature_create_vertex_groups(mesh_obj, skel, armature, ssbh_mesh_obj
             vertex_group.add([int(i) for i in ssbh_mesh_object.vertex_indices], 1.0, 'REPLACE')
         else:
             # Set the vertex skin weights for each bone.
-            # TODO: Is there a faster way than setting weights per vertex?
+            # VertexGroup.add() takes a list of indices, so vertices that share a
+            # weight go in together. Smash weights are quantized, so a bone's
+            # influences collapse to a handful of calls instead of one per vertex.
             for influence in ssbh_mesh_object.bone_influences:
                 # Avoid creating duplicate vertex groups.
                 # Influences may refer to effect bones not in the skel for some models.
@@ -1096,8 +1074,25 @@ def attach_armature_create_vertex_groups(mesh_obj, skel, armature, ssbh_mesh_obj
                 else:
                     vertex_group = mesh_obj.vertex_groups.new(name=influence.bone_name)
 
+                weight_to_indices: dict[float, list[int]] = {}
+                seen_indices: set[int] = set()
+                duplicate_index = False
                 for w in influence.vertex_weights:
-                    vertex_group.add([int(w.vertex_index)], w.vertex_weight, 'REPLACE')
+                    vertex_index = int(w.vertex_index)
+                    if vertex_index in seen_indices:
+                        # A repeated index means later writes must overwrite earlier
+                        # ones in order, so grouping is not safe here.
+                        duplicate_index = True
+                        break
+                    seen_indices.add(vertex_index)
+                    weight_to_indices.setdefault(w.vertex_weight, []).append(vertex_index)
+
+                if duplicate_index:
+                    for w in influence.vertex_weights:
+                        vertex_group.add([int(w.vertex_index)], w.vertex_weight, 'REPLACE')
+                else:
+                    for weight, indices in weight_to_indices.items():
+                        vertex_group.add(indices, weight, 'REPLACE')
 
         # Convert from Y up to Z up.
         mesh_obj.data.transform(Matrix.Rotation(math.radians(90), 4, 'X'))

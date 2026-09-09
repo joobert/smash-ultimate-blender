@@ -30,6 +30,7 @@ _POSE_BONE_PATH_DOUBLE = re.compile(r'^(pose\.bones\[")([^"]+)("\].*)$')
 _POSE_BONE_PATH_SINGLE = re.compile(r"^(pose\.bones\[')([^']+)('\].*)$")
 _IK_HELPER = re.compile(r'(HandIK|FootIK|ArmIK|KneeIK)[LR]?$', re.IGNORECASE)
 SMASH_POSE_CACHE_KEY = "sub_smash_pose_cache"
+SMASH_ANIM_SOURCE_KEY = "sub_anim_source_path"
 
 
 def flip_smash_translation(translation):
@@ -99,9 +100,52 @@ def store_smash_pose_cache(action, cache):
     action[SMASH_POSE_CACHE_KEY] = json.dumps(cache)
 
 
-def load_smash_pose_cache(action):
-    if action is None or SMASH_POSE_CACHE_KEY not in action:
+def rebuild_smash_pose_cache(action):
+    """Rebuild the Smash TRS cache by re-reading the action's source .nuanmb."""
+    source_path = action.get(SMASH_ANIM_SOURCE_KEY, "")
+    if not source_path or not os.path.isfile(source_path):
         return None
+    try:
+        from ...dependencies import ssbh_data_py
+        anim_data = ssbh_data_py.anim_data.read_anim(source_path)
+    except Exception:
+        return None
+
+    transform_group = next(
+        (group for group in anim_data.groups if group.group_type.name == 'Transform'),
+        None,
+    )
+    if transform_group is None:
+        return None
+
+    try:
+        start_frame = int(round(action.frame_range[0]))
+    except (AttributeError, TypeError, ValueError):
+        start_frame = 1
+
+    cache = {}
+    for node in transform_group.nodes:
+        if not node.tracks:
+            continue
+        for index, value in enumerate(node.tracks[0].values):
+            cache.setdefault(str(start_frame + index), {})[node.name] = {
+                "translation": list(value.translation),
+                "rotation": list(value.rotation),
+                "scale": list(value.scale),
+            }
+    return cache or None
+
+
+def load_smash_pose_cache(action):
+    if action is None:
+        return None
+    if SMASH_POSE_CACHE_KEY not in action:
+        # Older actions embedded this table; newly imported ones rebuild it from
+        # the source file the first time a flip actually needs it.
+        cache = rebuild_smash_pose_cache(action)
+        if cache is not None:
+            store_smash_pose_cache(action, cache)
+        return cache
     try:
         cache = json.loads(action[SMASH_POSE_CACHE_KEY])
     except (TypeError, ValueError, json.JSONDecodeError):

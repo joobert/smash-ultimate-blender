@@ -289,15 +289,18 @@ def check_for_newer_version():
             save_current_commit_sha(latest_sha)
             UPDATE_AVAILABLE = False
         elif current_sha != latest_sha:
-            # A local build newer than the branch is unreleased work. Never offer
-            # an "update" that would replace it with older code. Checked only
-            # here, so the extra request costs nothing when already up to date.
-            LOCAL_VERSION_AHEAD = local_version_is_ahead()
-            if LOCAL_VERSION_AHEAD:
+            # Commit differences alone do not make an equal or older version
+            # an update. Read the version at the exact commit being checked.
+            LOCAL_VERSION_AHEAD = local_version_is_ahead(latest_sha)
+            if (
+                LOCAL_ADDON_VERSION is not None
+                and REMOTE_ADDON_VERSION is not None
+                and LOCAL_ADDON_VERSION >= REMOTE_ADDON_VERSION
+            ):
                 local_text = ".".join(str(part) for part in LOCAL_ADDON_VERSION)
                 remote_text = ".".join(str(part) for part in REMOTE_ADDON_VERSION)
                 print(
-                    f"Smash_ultimate_blender: Installed version v{local_text} is newer "
+                    f"Smash_ultimate_blender: Installed version v{local_text} is equal to or newer "
                     f"than v{remote_text} on animation-workflow; not offering an update."
                 )
                 PENDING_UPDATE_COMMITS = []
@@ -872,4 +875,4 @@ def register_properties():
 
 def unregister_properties():
     if hasattr(bpy.types.Scene, 'sub_updater_download_path'):
-        del bpy.types.Scene.sub_updater_download_path 
+        del bpy.types.Scene.sub_updater_download_path

@@ -14,6 +14,11 @@ from .model.material import sub_matl_data
 from .model.skel import helper_bone_data
 
 
+def _update_idle_pose_folder(self, context):
+    from .extras.idle_pose_library import refresh_idle_poses
+    refresh_idle_poses(self)
+
+
 def _update_smash_viewport(self, context):
     try:
         from .extras.smash_viewport import update_smash_viewport
@@ -110,6 +115,10 @@ class ModelImportItem(PropertyGroup):
     files: CollectionProperty(type=ModelImportFile)
     alts: CollectionProperty(type=ModelImportAlt)
 
+class AnimationImportFolder(PropertyGroup):
+    path: StringProperty(subtype="DIR_PATH")
+
+
 class AnimationImportFile(PropertyGroup):
     name: StringProperty()
     path: StringProperty()
@@ -120,6 +129,7 @@ class AnimationImportFile(PropertyGroup):
     )
 
 class IdlePoseItem(PropertyGroup):
+    is_custom: BoolProperty(default=False)
     name: StringProperty(
         name="Pose Name",
         description="Name of the idle pose",
@@ -134,6 +144,7 @@ class IdlePoseItem(PropertyGroup):
 bpy.utils.register_class(ModelImportFile)
 bpy.utils.register_class(ModelImportAlt)
 bpy.utils.register_class(ModelImportItem)
+bpy.utils.register_class(AnimationImportFolder)
 bpy.utils.register_class(AnimationImportFile)
 
 class MirrorCustomBoneItem(PropertyGroup):
@@ -346,16 +357,23 @@ class SubSceneProperties(PropertyGroup):
         description="Path to the last imported model",
         default=""
     )
+    animation_import_folders: CollectionProperty(type=AnimationImportFolder)
+
     animation_import_folder_path: StringProperty(
         name="Animation Import Folder Path",
         description="Path to the folder containing animation files related to imported model",
-        default=""
+        default="",
+        update=_update_idle_pose_folder,
     )
     animation_import_files: CollectionProperty(
         name="Animation Import Files",
         description="List of found animations for imported model",
         type=AnimationImportFile
     )
+    animation_import_selection_anchor: StringProperty(options={'HIDDEN'})
+    action_export_selection_anchor: StringProperty(options={'HIDDEN'})
+    eye_look_expanded: BoolProperty(name="Eye Look", default=False)
+    smash_viewport_expanded: BoolProperty(name="Smash Viewport", default=False)
     animation_import_files_index: IntProperty(
         name="Animation Import Files Index",
         default=0
@@ -744,6 +762,11 @@ class SubSceneProperties(PropertyGroup):
     stage_shpc_expanded: BoolProperty(
         name="Ambient SH Expanded",
         description="Whether the Ambient SH section is expanded",
+        default=True,
+    )
+    stage_bf_ref_expanded: BoolProperty(
+        name="Battlefield Reference Expanded",
+        description="Whether the Battlefield Reference section is expanded",
         default=True,
     )
     last_stage_light_dir: StringProperty(

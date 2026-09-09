@@ -1,6 +1,7 @@
 import bpy
-from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
-from bpy.types import AddonPreferences, Operator, PropertyGroup, UIList
+import os
+from bpy.props import BoolProperty, CollectionProperty, IntProperty, StringProperty
+from bpy.types import AddonPreferences, PropertyGroup
 
 
 ADDON_MODULE_NAME = (__package__ or "").split(".")[0]
@@ -16,60 +17,36 @@ class SUB_PG_param_labels_path(PropertyGroup):
     )
 
 
-class SUB_PG_ultimate_panel_order_item(PropertyGroup):
-    panel_id: StringProperty(options={'HIDDEN'})
+class SUB_PG_model_export_path(PropertyGroup):
+    model_folder: StringProperty(name="Model Source Folder", subtype='DIR_PATH')
+    export_folder: StringProperty(name="Export Folder", subtype='DIR_PATH')
 
 
-class SUB_UL_ultimate_panel_order(UIList):
-    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
-        layout.label(text=item.name, icon='PREFERENCES')
-
-
-class SUB_OP_move_ultimate_panel(Operator):
-    bl_idname = "sub.move_ultimate_panel"
-    bl_label = "Move Ultimate Panel"
-    bl_description = "Move the selected panel in the persistent Ultimate sidebar order"
-    bl_options = {'INTERNAL'}
-
-    direction: EnumProperty(
-        items=(('UP', "Up", "Move the panel up"), ('DOWN', "Down", "Move the panel down")),
-        options={'HIDDEN'},
-    )
+class SUB_OP_model_export_path(bpy.types.Operator):
+    bl_idname = 'sub.model_export_path'
+    bl_label = 'Edit Model Export Folders'
+    index: IntProperty(default=-1)
 
     def execute(self, context):
-        preferences = get_addon_preferences(context)
-        if preferences is None:
+        prefs = get_addon_preferences(context)
+        if prefs is None:
             return {'CANCELLED'}
-        from .panel_order import apply_saved_order, sync_preferences
-
-        sync_preferences(preferences)
-        index = preferences.ultimate_panel_order_index
-        target = index - 1 if self.direction == 'UP' else index + 1
-        if target < 0 or target >= len(preferences.ultimate_panel_order):
-            return {'CANCELLED'}
-        preferences.ultimate_panel_order.move(index, target)
-        preferences.ultimate_panel_order_index = target
-        apply_saved_order(preferences)
-        return {'FINISHED'}
-
-
-class SUB_OP_reset_ultimate_panel_order(Operator):
-    bl_idname = "sub.reset_ultimate_panel_order"
-    bl_label = "Reset Ultimate Panel Order"
-    bl_description = "Restore the add-on's default Ultimate sidebar panel order"
-
-    def execute(self, context):
-        preferences = get_addon_preferences(context)
-        if preferences is None:
-            return {'CANCELLED'}
-        from .panel_order import reset_to_default
-
-        reset_to_default(preferences)
+        if self.index < 0:
+            item = prefs.model_export_paths.add()
+            obj = context.scene.sub_scene_properties.model_export_arma
+            if obj is not None:
+                item.model_folder = model_source_folder(obj)
+        elif self.index < len(prefs.model_export_paths):
+            prefs.model_export_paths.remove(self.index)
         return {'FINISHED'}
 
 
 class SUB_AddonPreferences(AddonPreferences):
     bl_idname = ADDON_MODULE_NAME
+
+    default_vanilla_nusktb_folder: StringProperty(name="Default Vanilla .nusktb Folder", subtype='DIR_PATH')
+    default_model_export_folder: StringProperty(name="Default Model Export Folder", subtype='DIR_PATH')
+    model_export_paths: CollectionProperty(type=SUB_PG_model_export_path)
 
     param_labels_paths: CollectionProperty(type=SUB_PG_param_labels_path)
     param_labels_paths_index: IntProperty(default=0)
@@ -102,11 +79,21 @@ class SUB_AddonPreferences(AddonPreferences):
         subtype="DIR_PATH",
     )
 
-    ultimate_panel_order: CollectionProperty(type=SUB_PG_ultimate_panel_order_item)
-    ultimate_panel_order_index: IntProperty(default=0)
-
     def draw(self, _context):
         layout = self.layout
+
+        box = layout.box()
+        box.label(text="Model Workflow Folders")
+        box.prop(self, 'default_vanilla_nusktb_folder')
+        box.prop(self, 'default_model_export_folder')
+        box.label(text="Match the imported model's source folder to its export folder.")
+        box.operator('sub.model_export_path', text='Add Model Folder', icon='ADD')
+        for index, item in enumerate(self.model_export_paths):
+            entry = box.box()
+            entry.prop(item, 'model_folder')
+            row = entry.row()
+            row.prop(item, 'export_folder')
+            row.operator('sub.model_export_path', text='', icon='X').index = index
 
         box = layout.box()
         box.label(text="Timeline FPS Shortcuts")
@@ -127,28 +114,11 @@ class SUB_AddonPreferences(AddonPreferences):
         box.prop(self, "collection_preset_directory")
 
         box = layout.box()
-        box.label(text="Ultimate Sidebar Panel Order")
-        box.label(text="Select a panel and use the arrows. The order is saved in preferences.", icon='INFO')
-        from .panel_order import sync_preferences
-
-        sync_preferences(self)
-        row = box.row()
-        row.template_list(
-            "SUB_UL_ultimate_panel_order",
-            "",
-            self,
-            "ultimate_panel_order",
-            self,
-            "ultimate_panel_order_index",
-            rows=8,
+        box.label(text="Ultimate Sidebar Layout")
+        box.label(
+            text="Panel visibility and order live in the Panel Presets panel at the bottom of the Ultimate tab.",
+            icon='INFO',
         )
-        controls = row.column(align=True)
-        op = controls.operator("sub.move_ultimate_panel", text="", icon='TRIA_UP')
-        op.direction = 'UP'
-        op = controls.operator("sub.move_ultimate_panel", text="", icon='TRIA_DOWN')
-        op.direction = 'DOWN'
-        controls.separator()
-        controls.operator("sub.reset_ultimate_panel_order", text="", icon='LOOP_BACK')
 
         box = layout.box()
         box.label(text="Additional ParamLabels Files")
@@ -163,10 +133,8 @@ class SUB_AddonPreferences(AddonPreferences):
 
 CLASSES = (
     SUB_PG_param_labels_path,
-    SUB_PG_ultimate_panel_order_item,
-    SUB_UL_ultimate_panel_order,
-    SUB_OP_move_ultimate_panel,
-    SUB_OP_reset_ultimate_panel_order,
+    SUB_PG_model_export_path,
+    SUB_OP_model_export_path,
     SUB_AddonPreferences,
 )
 
@@ -175,6 +143,26 @@ def get_addon_preferences(context=None):
     context = context or bpy.context
     addon = context.preferences.addons.get(ADDON_MODULE_NAME)
     return addon.preferences if addon is not None else None
+
+
+def model_source_folder(obj):
+    if obj is None:
+        return ''
+    return obj.get('sub_smash_model_folder', '') or obj.data.get('sub_smash_model_folder', '')
+
+
+def model_export_folder(obj, context=None):
+    prefs = get_addon_preferences(context)
+    if prefs is None:
+        return ''
+    def normalized(path):
+        return os.path.normcase(os.path.normpath(bpy.path.abspath(path)))
+    source = model_source_folder(obj)
+    if source:
+        for item in prefs.model_export_paths:
+            if item.model_folder and item.export_folder and normalized(item.model_folder) == normalized(source):
+                return bpy.path.abspath(item.export_folder)
+    return bpy.path.abspath(prefs.default_model_export_folder) if prefs.default_model_export_folder else ''
 
 
 def fps_presets(context=None):

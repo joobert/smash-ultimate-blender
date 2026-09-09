@@ -16,3 +16,4 @@ native/bin/*.dylib
 !native/bin/ssbh_blender_preview.dll
 !native/bin/libssbh_blender_preview.so
 !native/bin/libssbh_blender_preview.dylib
+.tests/

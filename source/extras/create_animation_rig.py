@@ -3101,6 +3101,39 @@ class SUB_OP_bake_and_remove_rig(Operator):
         return {'FINISHED'}
 
 
+def key_ik_stretch(context, armature_obj, kind, enabled):
+    """Store stretch in the same SAP action as the FK/IK switches."""
+    path = 'sub_ik_stretch_' + kind.lower()
+    _key_bool_prop(armature_obj, path, context.scene.frame_current, new_value=enabled)
+    _action, curve = _bool_switch_fcurve(armature_obj, path)
+    for point in curve.keyframe_points:
+        point.interpolation = 'CONSTANT'
+    curve.update()
+    setattr(armature_obj.data, path, enabled)
+    armature_obj.update_tag()
+    context.view_layer.update()
+
+
+class SUB_OP_key_ik_stretch(Operator):
+    bl_idname = 'sub.key_ik_stretch'
+    bl_label = 'Toggle and Key IK Stretch'
+    bl_description = 'Toggle IK Stretch and key its state at the current frame'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    limbs: bpy.props.EnumProperty(items=(('ARMS', 'Arms', ''), ('LEGS', 'Legs', '')))
+
+    @classmethod
+    def poll(cls, context):
+        obj = find_target_armature(context)
+        return obj is not None and armature_has_ik(obj)
+
+    def execute(self, context):
+        obj = find_target_armature(context)
+        path = 'sub_ik_stretch_' + self.limbs.lower()
+        key_ik_stretch(context, obj, self.limbs, not getattr(obj.data, path))
+        return {'FINISHED'}
+
+
 class SUB_OP_anim_rig_toggle_ik_fk(Operator):
     bl_idname = "sub.anim_rig_toggle_ik_fk"
     bl_label = "Switch IK/FK"
@@ -3179,6 +3212,20 @@ class SUB_OP_anim_rig_toggle_ik_fk(Operator):
 _last_pose_tool_bone = None
 _pose_tool_msgbus = object()
 _pose_tool_busy = False
+_pose_tool_defer_depth = 0
+
+
+@contextlib.contextmanager
+def defer_pose_tool_updates():
+    """Refresh the interactive pose tool once after a synchronous rig edit."""
+    global _pose_tool_defer_depth
+    _pose_tool_defer_depth += 1
+    try:
+        yield
+    finally:
+        _pose_tool_defer_depth -= 1
+        if _pose_tool_defer_depth == 0:
+            _schedule_pose_tool()
 
 
 def _tool_id_for_pose_bone(pose_bone):
@@ -3317,7 +3364,7 @@ def _set_view3d_tool(context, tool_id):
 
 def _apply_pose_tool(context):
     global _last_pose_tool_bone
-    if _pose_tool_busy or _file_browser_open(context):
+    if _pose_tool_defer_depth or _pose_tool_busy or _file_browser_open(context):
         return
     if getattr(context, "mode", None) != "POSE":
         _last_pose_tool_bone = None
@@ -3355,6 +3402,8 @@ def _pose_tool_apply_soon():
 
 
 def _schedule_pose_tool():
+    if _pose_tool_defer_depth:
+        return
     try:
         context = bpy.context
         if context is not None and not _pose_tool_busy and not _file_browser_open(context):
@@ -3401,6 +3450,8 @@ def _subscribe_pose_tool_msgbus():
 
 @persistent
 def _pose_tool_depsgraph(_scene, _depsgraph):
+    if _pose_tool_defer_depth:
+        return
     try:
         context = bpy.context
         if context is None or getattr(context, "mode", None) != "POSE":
@@ -3431,7 +3482,7 @@ def _ensure_ik_drivers_on_loaded_rigs():
     for obj in bpy.data.objects:
         if obj.type != 'ARMATURE':
             continue
-        if not obj.data.get(ARMATURE_FLAG):
+        if not (obj.data.get(ARMATURE_FLAG) or obj.data.get('sub_independent_ik')):
             continue
         if armature_has_ik(obj):
             _ensure_ik_influence_drivers(obj)
@@ -3451,7 +3502,8 @@ def _heal_widgets_once():
 
 def _unregister_ik_fk_props():
     for cls in (bpy.types.Object, bpy.types.Armature):
-        for name in ("sub_use_ik", "sub_use_ik_arms", "sub_use_ik_legs"):
+        for name in ("sub_use_ik", "sub_use_ik_arms", "sub_use_ik_legs",
+                     "sub_ik_stretch_arms", "sub_ik_stretch_legs"):
             if hasattr(cls, name):
                 try:
                     delattr(cls, name)
@@ -3461,6 +3513,12 @@ def _unregister_ik_fk_props():
 
 def register():
     _unregister_ik_fk_props()
+    for kind in ('arms', 'legs'):
+        setattr(bpy.types.Armature, 'sub_ik_stretch_' + kind, bpy.props.BoolProperty(
+            name='IK Stretch ' + kind.title(),
+            description='Let hands or feet follow the IK target beyond limb reach',
+            default=False,
+        ))
     bpy.types.Armature.sub_use_ik_arms = bpy.props.FloatProperty(
         name="Arms",
         description="0 is arm FK, 1 is arm IK (including extra arms). Keys ease between them",

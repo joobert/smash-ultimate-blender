@@ -49,11 +49,6 @@ class SUB_PT_animation_tools(Panel):
         from .anim_rig_extras import draw_anim_rig_extras, _draw_ik_fk_switch_rows
         draw_anim_rig_extras(layout, context, arm)
 
-        if arm is not None and armature_has_ik(arm):
-            box_ik = layout.box()
-            box_ik.label(text="IK / FK", icon="CON_KINEMATIC")
-            _draw_ik_fk_switch_rows(box_ik, arm)
-
         from .finger_sliders import has_finger_sliders, finger_sliders_are_enabled
         if arm is not None and has_finger_sliders(arm):
             row = layout.row(align=True)
@@ -72,112 +67,43 @@ class SUB_PT_animation_tools(Panel):
 
         layout.separator()
 
-        # Add idle pose library (moved to top)
-        box = layout.box()
-        
-        # Collapsible header with toggle
-        header_row = box.row()
-        header_row.prop(ssp, "idle_pose_library_expanded", 
-                       icon="TRIA_DOWN" if ssp.idle_pose_library_expanded else "TRIA_RIGHT",
-                       icon_only=True, emboss=False)
-        header_row.label(text="Idle Pose Library")
-        
-        # Only show content if expanded
-        if ssp.idle_pose_library_expanded:
-            # Checkboxes
-            row = box.row(align=True)
-            row.prop(ssp, "idle_pose_include_trans", text="Include Trans Bone")
-            
-            row = box.row(align=True)
-            row.prop(ssp, "idle_pose_mirrored", text="Mirrored")
-            row.prop(ssp, "idle_pose_180_rotate", text="180 Rotate")
-            
-            # Store custom pose button (moved above dropdown)
-            row = box.row(align=True)
-            row.operator("sub.store_idle_pose", text="Store Custom Pose")
-            
-            # Dropdown for pose selection using template_list
-            row = box.row()
-            row.template_list("UI_UL_list", "idle_pose_list", ssp, "idle_pose_list", ssp, "idle_pose_list_index")
-            
-            # Apply button for selected pose
-            row = box.row(align=True)
-            if ssp.idle_pose_list and ssp.idle_pose_list_index < len(ssp.idle_pose_list):
-                row.operator("sub.apply_idle_pose_from_list", text="Apply Selected Pose")
-            else:
-                row.enabled = False
-                row.operator("sub.apply_idle_pose_from_list", text="Apply Selected Pose (None Selected)")
-
-        layout.separator()
-
-        # User Poses section (below Idle Pose Library)
-        box = layout.box()
-
-        header_row = box.row()
-        header_row.prop(ssp, "user_poses_expanded",
-                        icon="TRIA_DOWN" if ssp.user_poses_expanded else "TRIA_RIGHT",
-                        icon_only=True, emboss=False)
-        header_row.label(text="User Poses")
-
-        if ssp.user_poses_expanded:
-            # Controls above list
-            controls = box.row(align=True)
-            controls.operator("sub.user_pose_add", text="Add (+)", icon='ADD')
-            controls.operator("sub.user_pose_remove", text="Remove (-)", icon='REMOVE')
-
-            # List
-            row = box.row()
-            row.template_list("UI_UL_list", "user_pose_list", ssp, "user_pose_list", ssp, "user_pose_list_index")
-
-            # Options and Apply below list
-            box.prop(ssp, "user_pose_apply_only_selected", text="Apply to only selected bones")
-
-            apply_row = box.row(align=True)
-            if ssp.user_pose_list and ssp.user_pose_list_index < len(ssp.user_pose_list):
-                apply_row.operator("sub.user_pose_apply_selected", text="Apply to Current Frame")
-            else:
-                apply_row.enabled = False
-                apply_row.operator("sub.user_pose_apply_selected", text="Apply to Current Frame (None Selected)")
-
         # Add IK Tools collapsible section (similar to Idle Pose Library)
         box = layout.box()
-        
+
         # Collapsible header with toggle
         header_row = box.row()
-        header_row.prop(ssp, "ik_tools_expanded", 
+        header_row.prop(ssp, "ik_tools_expanded",
                        icon="TRIA_DOWN" if ssp.ik_tools_expanded else "TRIA_RIGHT",
                        icon_only=True, emboss=False)
         header_row.label(text="IK Tools")
-        
+
         # Only show content if expanded
         if ssp.ik_tools_expanded:
             if context.mode != 'EDIT_ARMATURE':
                 # IK Setup section (using OG operators)
                 col = box.column(align=True)
-                col.label(text="IK Setup:")
+                col.label(text="Create IK Controls", icon="BONE_DATA")
                 col.operator("sub.create_ik_bones", text="Create IK Bones (Arms + Legs)")
                 col.operator("sub.create_arm_ik", text="Create Arm IK Bones")
                 col.operator("sub.create_foot_ik", text="Create Foot IK Bones")
-                # Only show buttons for operators that are registered
-                if hasattr(bpy.types, 'SUB_OP_quick_switch_ik_fk'):
-                    col.operator("sub.quick_switch_ik_fk", text="Switch IK/FK")
                 col.separator()
 
                 # Same IK/FK switches + Match as Animation Rig
                 arm_ik = find_anim_rig_armature(context)
                 if arm_ik is not None and armature_has_ik(arm_ik):
-                    col.label(text="IK / FK Control:")
-                    from .anim_rig_extras import _draw_ik_fk_switch_rows
-                    _draw_ik_fk_switch_rows(col, arm_ik)
+                    box_ik = box.box()
+                    box_ik.label(text="IK / FK", icon="CON_KINEMATIC")
+                    _draw_ik_fk_switch_rows(box_ik, arm_ik)
+                    col = box.column(align=True)
                     col.separator()
-                
+
                 # Animation Tools section
-                col.label(text="Animation Tools:")
+                col.label(text="Bake IK", icon="ACTION")
                 col.operator("sub.apply_ik_animation", text="Bake & Remove IK/FK")
                 col.separator()
-                
+
                 # Legacy influence toggle
-                col.label(text="More:")
+                col.label(text="Advanced Controls")
                 if hasattr(bpy.types, 'SUB_OP_advanced_ik_fk_control'):
                     col.operator("sub.advanced_ik_fk_control", text="Advanced IK/FK Control")
                 col.operator("sub.toggle_ik_influence", text="Toggle IK Influence")
@@ -229,29 +155,98 @@ class SUB_PT_animation_tools(Panel):
                     else:
                         bulk_box.label(text="Select an armature to configure Bulk IK", icon='INFO')
 
+
+        # Add idle pose library (moved to top)
+        box = layout.box()
+
+        # Collapsible header with toggle
+        header_row = box.row()
+        header_row.prop(ssp, "idle_pose_library_expanded",
+                       icon="TRIA_DOWN" if ssp.idle_pose_library_expanded else "TRIA_RIGHT",
+                       icon_only=True, emboss=False)
+        header_row.label(text="Idle Pose Library")
+
+        # Only show content if expanded
+        if ssp.idle_pose_library_expanded:
+            box.label(text=ssp.animation_import_folder_path or 'No active animation folder', icon='FILE_FOLDER')
+            # Checkboxes
+            row = box.row(align=True)
+            row.prop(ssp, "idle_pose_include_trans", text="Include Trans Bone")
+
+            row = box.row(align=True)
+            row.prop(ssp, "idle_pose_mirrored", text="Mirrored")
+            row.prop(ssp, "idle_pose_180_rotate", text="180 Rotate")
+
+            # Store custom pose button (moved above dropdown)
+            row = box.row(align=True)
+            row.operator("sub.store_idle_pose", text="Store Custom Pose")
+
+            # Dropdown for pose selection using template_list
+            row = box.row()
+            row.template_list("UI_UL_list", "idle_pose_list", ssp, "idle_pose_list", ssp, "idle_pose_list_index")
+
+            # Apply button for selected pose
+            row = box.row(align=True)
+            if ssp.idle_pose_list and ssp.idle_pose_list_index < len(ssp.idle_pose_list):
+                row.operator("sub.apply_idle_pose_from_list", text="Apply Selected Pose")
+            else:
+                row.enabled = False
+                row.operator("sub.apply_idle_pose_from_list", text="Apply Selected Pose (None Selected)")
+
+        layout.separator()
+
+        # User Poses section (below Idle Pose Library)
+        box = layout.box()
+
+        header_row = box.row()
+        header_row.prop(ssp, "user_poses_expanded",
+                        icon="TRIA_DOWN" if ssp.user_poses_expanded else "TRIA_RIGHT",
+                        icon_only=True, emboss=False)
+        header_row.label(text="User Poses")
+
+        if ssp.user_poses_expanded:
+            # Controls above list
+            controls = box.row(align=True)
+            controls.operator("sub.user_pose_add", text="Save Pose", icon='ADD')
+            controls.operator("sub.user_pose_remove", text="Remove Pose", icon='REMOVE')
+
+            # List
+            row = box.row()
+            row.template_list("UI_UL_list", "user_pose_list", ssp, "user_pose_list", ssp, "user_pose_list_index")
+
+            # Options and Apply below list
+            box.prop(ssp, "user_pose_apply_only_selected", text="Apply to only selected bones")
+
+            apply_row = box.row(align=True)
+            if ssp.user_pose_list and ssp.user_pose_list_index < len(ssp.user_pose_list):
+                apply_row.operator("sub.user_pose_apply_selected", text="Apply to Current Frame")
+            else:
+                apply_row.enabled = False
+                apply_row.operator("sub.user_pose_apply_selected", text="Apply to Current Frame (None Selected)")
+
         # Mirror Animation section
         layout.separator()
         box = layout.box()
-        
+
         # Collapsible header with toggle
         ssp = context.scene.sub_scene_properties
         header_row = box.row()
-        header_row.prop(ssp, "mirror_animation_expanded", 
+        header_row.prop(ssp, "mirror_animation_expanded",
                        icon="TRIA_DOWN" if ssp.mirror_animation_expanded else "TRIA_RIGHT",
                        icon_only=True, emboss=False)
         header_row.label(text="Mirror Animation")
-        
+
         # Only show content if expanded
         if ssp.mirror_animation_expanded:
             col = box.column(align=True)
-            
+
             # Add some spacing
             col.separator()
-            
+
             # Mirror space option
             col.prop(ssp, "mirror_space", text="Space")
             col.prop(ssp, "mirror_smash_y_anim_flip", text="Smash Y Anim Flip")
-            
+
             col.separator()
             col.operator("sub.find_custom_mirror_bones", text="Find Custom Bones")
             if ssp.mirror_custom_bones:
@@ -273,14 +268,14 @@ class SUB_PT_animation_tools(Panel):
                 op_none.include = False
             else:
                 col.label(text="Scan the armature to list extra bones")
-            
+
             # Add spacing between dropdown and button
             col.separator()
-            
+
             # Mirror Animation button
             col.operator("sub.mirror_action", text="Mirror Animation")
             col.operator("sub.mirror_all_actions", text="Mirror All Loaded Animations", icon='RENDER_ANIMATION')
-            
+
             # Add bottom spacing
             col.separator()
         else:
@@ -318,7 +313,7 @@ class SUB_PT_animation_tools(Panel):
             icon_only=True,
             emboss=False,
         )
-        misc_header.label(text="Misc Anim Stuff")
+        misc_header.label(text="Animation Utilities")
         if ssp.misc_anim_stuff_expanded:
             col = misc_box.column(align=True)
             col.operator("sub.transfer_hip_animation", text="Transfer Hip Animation to Trans")
@@ -360,17 +355,6 @@ class SUB_PT_model_tools(Panel):
         layout = self.layout
         layout.use_property_split = False
         ssp = context.scene.sub_scene_properties
-
-        try:
-            row = layout.row()
-            row.scale_y = 1.4
-            row.operator(
-                "sub.smash_vp_shade_setup",
-                text="Reload Smash Model",
-                icon="FILE_REFRESH",
-            )
-        except Exception:
-            pass
 
         row = layout.row(align=True)
         row.operator("sub.limit_weights", text="Limit Weights to 4")
@@ -487,62 +471,74 @@ class SUB_PT_misc_utilities(Panel):
         layout.operator("sub.append_param_labels", text="Append New Hashes", icon="FILE_TICK")
         ssp = context.scene.sub_scene_properties
 
+        layout.separator()
+        from .smash_viewport import draw_smash_viewport_ui
+        viewport_box = layout.box()
+        header = viewport_box.row()
+        header.prop(ssp, "smash_viewport_expanded", icon="TRIA_DOWN" if ssp.smash_viewport_expanded else "TRIA_RIGHT", icon_only=True, emboss=False)
+        header.label(text="Smash Viewport", icon="SHADING_RENDERED")
+        if ssp.smash_viewport_expanded:
+            draw_smash_viewport_ui(viewport_box, context)
+        layout.separator()
         eye_box = layout.box()
-        eye_box.label(text="Eye Look (CustomVector31)", icon="HIDE_OFF")
-        eye_box.operator("sub.setup_eye_cv31", icon="DRIVER")
+        header = eye_box.row()
+        header.prop(ssp, "eye_look_expanded", icon="TRIA_DOWN" if ssp.eye_look_expanded else "TRIA_RIGHT", icon_only=True, emboss=False)
+        header.label(text="Eye Look", icon="HIDE_OFF")
+        if ssp.eye_look_expanded:
+            eye_box.operator("sub.setup_eye_cv31", icon="DRIVER")
 
-        arma = context.object if (context.object and context.object.type == 'ARMATURE') else None
-        if arma is not None:
-            sap = arma.data.sub_anim_properties
-            ready = any(
-                (t := sap.mat_tracks.get(n)) is not None
-                and t.properties.get('CustomVector31') is not None
-                for n in ('EyeL', 'EyeR')
-            )
-            if not ready:
-                warn = eye_box.box()
-                warn.alert = True
-                warn.label(text="No EyeL/EyeR CustomVector31 yet -", icon="ERROR")
-                warn.label(text="aiming will do nothing. Run Set Up first.")
+            arma = context.object if (context.object and context.object.type == 'ARMATURE') else None
+            if arma is not None:
+                sap = arma.data.sub_anim_properties
+                ready = any(
+                    (t := sap.mat_tracks.get(n)) is not None
+                    and t.properties.get('CustomVector31') is not None
+                    for n in ('EyeL', 'EyeR')
+                )
+                if not ready:
+                    warn = eye_box.box()
+                    warn.alert = True
+                    warn.label(text="No EyeL/EyeR CustomVector31 yet -", icon="ERROR")
+                    warn.label(text="aiming will do nothing. Run Set Up first.")
 
-        eye_box.separator()
-        eye_box.label(text="Look Control Rig", icon="BONE_DATA")
-        eye_box.operator("sub.add_eye_look_control", icon="BONE_DATA")
-        eye_box.operator("sub.match_eye_look_from_material", icon="KEYINGSET")
-        eye_box.operator("sub.bake_eye_look", icon="KEYFRAME")
-        eye_box.prop(ssp, "eye_look_live_preview")
-        eye_box.prop(ssp, "eye_look_mode")
-        rowlc = eye_box.row(align=True)
-        if ssp.eye_look_mode == 'LOOK_AT':
-            rowlc.prop(ssp, "eye_look_gain", text="Gain X")
-            rowlc.prop(ssp, "eye_look_gain_y", text="Gain Y")
-        else:
-            rowlc.prop(ssp, "eye_look_sensitivity", text="Sens X")
-            rowlc.prop(ssp, "eye_look_sensitivity_y", text="Sens Y")
-        eye_box.prop(ssp, "eye_look_clamp")
-        rowinv = eye_box.row(align=True)
-        rowinv.prop(ssp, "eye_look_invert_x", toggle=True)
-        rowinv.prop(ssp, "eye_look_invert_y", toggle=True)
-        eye_box.prop(ssp, "eye_look_pupil_from_scale")
-        if ssp.eye_look_pupil_from_scale:
-            eye_box.prop(ssp, "eye_look_scale_about_pupil")
-            if ssp.eye_look_scale_about_pupil:
-                eye_box.prop(ssp, "eye_pupil_centre_auto")
-                if not ssp.eye_pupil_centre_auto:
-                    eye_box.prop(ssp, "eye_pupil_centre", text="Centre UV")
-                eye_box.operator("sub.measure_pupil_centre", icon="EYEDROPPER")
-            pupil_box = eye_box.box()
-            pupil_box.label(text="Scale the control bone (S) to resize", icon="INFO")
-            pupil_box.label(text="the pupil. Smaller bone = smaller pupil.")
-        hint = eye_box.box()
-        hint.label(text="Move the control in Pose Mode to preview,", icon="INFO")
-        hint.label(text="then Bake Eyes so the look exports")
-        hint.label(text="and the control bone is removed.")
-        hint.label(text="Live preview alone won't export -")
-        hint.label(text="export reads keyframes, not drivers.")
-        hint.label(text="Turn on Live Preview for Solid Texture")
-        hint.label(text="and Material look, including imported")
-        hint.label(text="EyeL/EyeR material anims. Turn it off when done.")
+            eye_box.separator()
+            eye_box.label(text="Look Control Rig", icon="BONE_DATA")
+            eye_box.operator("sub.add_eye_look_control", icon="BONE_DATA")
+            eye_box.operator("sub.match_eye_look_from_material", icon="KEYINGSET")
+            eye_box.operator("sub.bake_eye_look", icon="KEYFRAME")
+            eye_box.prop(ssp, "eye_look_live_preview")
+            eye_box.prop(ssp, "eye_look_mode")
+            rowlc = eye_box.row(align=True)
+            if ssp.eye_look_mode == 'LOOK_AT':
+                rowlc.prop(ssp, "eye_look_gain", text="Gain X")
+                rowlc.prop(ssp, "eye_look_gain_y", text="Gain Y")
+            else:
+                rowlc.prop(ssp, "eye_look_sensitivity", text="Sens X")
+                rowlc.prop(ssp, "eye_look_sensitivity_y", text="Sens Y")
+            eye_box.prop(ssp, "eye_look_clamp")
+            rowinv = eye_box.row(align=True)
+            rowinv.prop(ssp, "eye_look_invert_x", toggle=True)
+            rowinv.prop(ssp, "eye_look_invert_y", toggle=True)
+            eye_box.prop(ssp, "eye_look_pupil_from_scale")
+            if ssp.eye_look_pupil_from_scale:
+                eye_box.prop(ssp, "eye_look_scale_about_pupil")
+                if ssp.eye_look_scale_about_pupil:
+                    eye_box.prop(ssp, "eye_pupil_centre_auto")
+                    if not ssp.eye_pupil_centre_auto:
+                        eye_box.prop(ssp, "eye_pupil_centre", text="Centre UV")
+                    eye_box.operator("sub.measure_pupil_centre", icon="EYEDROPPER")
+                pupil_box = eye_box.box()
+                pupil_box.label(text="Scale the control bone (S) to resize", icon="INFO")
+                pupil_box.label(text="the pupil. Smaller bone = smaller pupil.")
+            hint = eye_box.box()
+            hint.label(text="Move the control in Pose Mode to preview,", icon="INFO")
+            hint.label(text="then Bake Eyes so the look exports")
+            hint.label(text="and the control bone is removed.")
+            hint.label(text="Live preview alone won't export -")
+            hint.label(text="export reads keyframes, not drivers.")
+            hint.label(text="Turn on Live Preview for Solid Texture")
+            hint.label(text="and Material look, including imported")
+            hint.label(text="EyeL/EyeR material anims. Turn it off when done.")
 
         layout.separator()
         box = layout.box()
@@ -568,9 +564,7 @@ class SUB_PT_misc_utilities(Panel):
                 icon="MATERIAL",
             )
 
-        layout.separator()
-        from .smash_viewport import draw_smash_viewport_ui
-        draw_smash_viewport_ui(layout, context) 
+
 class SUB_OP_mirror_vertex_groups(bpy.types.Operator):
     bl_idname = "sub.mirror_vertex_groups"
     bl_label = "Mirror Vertex Groups"
@@ -713,46 +707,46 @@ class SUB_OP_convert_shape_keys_to_meshes(bpy.types.Operator):
         obj = context.active_object
         ssp = context.scene.sub_scene_properties
         prefix = ssp.shape_keys_prefix
-        
+
         if not prefix:
             self.report({'ERROR'}, "Please enter a prefix for the shape keys.")
             return {'CANCELLED'}
-        
+
         if not obj.data.shape_keys or not obj.data.shape_keys.key_blocks:
             self.report({'ERROR'}, "No shape keys found on this mesh.")
             return {'CANCELLED'}
-        
+
         # Create new meshes for each shape key
         created_meshes = 0
         for shape_key in obj.data.shape_keys.key_blocks:
             # Skip Basis
             if shape_key.name == "Basis":
                 continue
-            
+
             # Create a copy of the mesh
             new_mesh_obj = obj.copy()
             new_mesh_obj.data = obj.data.copy()
-            
+
             # Create the new name: Prefix_ShapeKeyName_VIS_O_OBJShape
             new_name = f"{prefix}_{shape_key.name}_VIS_O_OBJShape"
             new_mesh_obj.name = new_name
             new_mesh_obj.data.name = new_name
-            
+
             # Set the shape key as active and "show only shape key"
             new_mesh_obj.show_only_shape_key = True
             new_mesh_obj.active_shape_key_index = new_mesh_obj.data.shape_keys.key_blocks.find(shape_key.name)
-            
+
             # Add a combined key from the mix
             new_mesh_obj.shape_key_add(name="_temp_combined_key", from_mix=True)
-            
+
             # Remove all shape keys
             for sk in list(new_mesh_obj.data.shape_keys.key_blocks):
                 new_mesh_obj.shape_key_remove(sk)
-            
+
             # Add to the scene
             context.collection.objects.link(new_mesh_obj)
             created_meshes += 1
-        
+
         self.report({'INFO'}, f"Created {created_meshes} meshes from shape keys.")
         return {'FINISHED'}
 
@@ -903,5 +897,5 @@ def unregister():
     bpy.utils.unregister_class(SUB_PT_misc_utilities)
     bpy.utils.unregister_class(SUB_PT_model_tools)
     bpy.utils.unregister_class(SUB_PT_animation_tools)
-        
-    
+
+

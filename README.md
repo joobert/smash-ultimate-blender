@@ -50,13 +50,15 @@ These are the pieces that are **not** in the main plugin, or are substantially d
 
 - Imported action-name extensions are configurable in the add-on preferences: `.nuanmb` is hidden by default and `.rawanim` is shown by default
 
-- Browse one or more `.nuanmb` files, or **Browse Animation Folder** and pick from a list
-- Click, Ctrl-click, or Shift-click to select animations, with **Select All** and **Deselect All** controls
+- Browse one or more `.nuanmb` files, or **Add Animation Folder** and pick from a list. Adding a parent directory discovers animation folders beneath it; linked folders and Windows junctions are supported without revisiting targets
+- Switch between remembered directories using the **Folder** menu. The selected folder is associated with the active armature, and folder controls remain available when the list is empty
+- Checkboxes include animations independently; clicking a name selects one, Ctrl/Cmd-click toggles, Shift-click selects a range, and Ctrl/Cmd+Shift adds a range. Repeated Shift-clicks keep the same anchor. **Select All** and **Deselect All** are also available
 - **Import Selected Animations** / **Import All Animations**
 - Import options: transform, material, visibility
 - **Raw Animations** — browse a folder of `.rawanim` files, import selected or all (fighter `motion/body` folders auto-point at `rawanims` when present)
 - In Armature Data → **Ultimate Visibility Track Entries**, use **Purge Current** or **Purge All Anims** to remove tracks with no corresponding model mesh and compact the shared list safely
 - Visibility names are matched case-insensitively; case-only duplicates are merged using logical OR so an enabled state is not lost
+- Importing transforms while IK is enabled matches the new motion to those limbs. Raw imports preserve existing authored target/pole channels; material/visibility-only imports skip matching. Import temporarily disables auto-key and restores it and the previous mode afterward
 
 **Exporter**:
 
@@ -64,6 +66,26 @@ These are the pieces that are **not** in the main plugin, or are substantially d
 - **Export Raw Animation** and **Include Raw with .NUANMB Export** live in the **Raw Animations** panel, not here
 - Bone override list, populate-from-armature, **Thrown** preset
 - Bones named `BL_*` are skipped on anim (and model) export so helper controls never ship in-game
+
+### Model folders and export settings
+
+- In add-on preferences, **Model Workflow Folders** sets the default vanilla `.nusktb` browser folder and model export destination
+- **Add Model Folder** maps an imported model's source directory to its export directory. A matching model destination overrides the global default; the export browser still lets you choose another location
+- Model discovery follows symlinks and Windows junctions, including linked mod directories
+- Model export defaults to **Order Only**: preserve vanilla bone order while using Blender's bone transforms. Choose **Order & Values** to retain vanilla transforms too. Without a selected vanilla skeleton, the export dialog uses **No Link**
+
+Setup details: [Model workflow folders](docs/model-workflow-folders.md).
+
+### Export Doctor
+
+**Export Doctor** in the Ultimate tab checks model and animation export data before files are written. Use **Run Checks**, **Model Only**, or **Animation Only** to inspect a scene at any time.
+
+- Sixteen checks cover materials and shader attributes, weights, modifiers, transforms, naming collisions, skeletons, IK/unbaked controls, action slots, camera names, frame ranges, scale inheritance, non-finite values, and missing paths
+- Click a result to select its object, material, bone, or action; severity counts filter the list
+- **Fix Safe Issues** applies safe fixes and reruns checks. Individual fixes are also available; rig baking requires a separate decision
+- **Run Before Export** and **Block Invalid Exports** are on by default. Blocking findings stop model, single-animation, or batch-animation export before it writes files
+- Missing vanilla bones and remaining IK controls warn without blocking custom rigs. Missing configured skeleton/PRC files block; missing remembered browser folders are informational
+- Animation-only checks use the active export object, so exporting a camera does not inspect an unrelated model armature
 
 ### Animation Tools
 
@@ -76,23 +98,26 @@ These are the pieces that are **not** in the main plugin, or are substantially d
   - Hide helper / swing bones, match IK to the loaded anim, clean leftover keyframes
 - **Rig Extras** — once a rig exists, IK, Eyes, and Fingers each show as Added or Missing with a one-click **Add** or **Bake & Remove**, so you can build a rig without one of them and add it later
 - Remove rig, or **Bake and Remove Rig** (fingers / eyes / IK)
-- **Idle Pose Library** — store/apply idles, include Trans, mirrored, 180 rotate
-- **User Poses** — add/remove poses, apply to selected bones or the current frame
+- **Idle Pose Library** — predefined poses come from the active animation folder and refresh when it changes. Applying reads the source clip on demand; custom stored poses remain available across folder changes. Options include Trans, mirrored, and 180 rotate
+- **User Poses** — **Save Pose**, **Remove Pose**, and **Apply to Current Frame**, with an option to affect only selected bones
 - **IK Tools** — create arm/leg IK, bake & remove IK/FK, toggle influence, **Bulk IK** on every loaded animation
-- **Mirror Animation** — space, Smash Y Anim Flip, custom extra bones, **Mirror All Loaded Animations**
+- **Mirror Animation** — space, Smash Y Anim Flip, custom extra bones, **Mirror All Loaded Animations**. Newly imported actions rebuild their Smash pose cache from the source `.nuanmb` when first needed; if the source has moved, mirroring falls back to the armature-derived pose path
 - **Misc Anim Stuff** (collapsible) — Transfer Hip Animation to Trans, Reset Bone Locations, Ground Character, Invert Positive and Negative, Remove Animation from Swing Bones, **GIF or Photo** (also on the Action Editor header)
 - **Animation Layers** — when the Animation Layers addon is installed, its UI is embedded in a collapsible section here, and layer handlers are paused around rig edits that would otherwise crash Blender
 
 #### Independent IK and FK
 
-IK and FK are separate channels rather than one influence slider. Full notes: [`docs/ik-fk-workflow.md`](docs/ik-fk-workflow.md).
+IK and FK have independent animation channels, with keyed mode values that blend between them. Full notes: [`docs/ik-fk-workflow.md`](docs/ik-fk-workflow.md).
 
 - **Switch to IK** / **Switch to FK** per Arms, Legs, or Both. Each switch keys only the destination mode at the current frame, so opposite-mode keys on different frames blend between them. The same rows appear in Animation Rig and in IK Tools
-- Creating limbs offers to copy the current FK animation into IK. Creation and matching add no switch keys and leave FK transform keys intact; new controls start in FK
-- **Match IK to Current Animation** appears when an action is newly loaded, controls are newly created, or a limb is unmatched. Matching samples the scene frame range and does not overwrite edited controls
+- Creating limbs matches the current FK pose, keys IK mode at the current frame, and enables the new controls immediately. Accept the optional match dialog to copy the full FK animation into IK; FK transform keys remain intact
+- **Match IK to Current Animation** appears for unmatched actions or limbs. It samples the scene frame range and writes IK controls from the FK source; use it to refresh IK after editing FK. Switching modes alone does not rematch or overwrite edited controls
+- **IK Stretch Arms / Legs** is off by default. Hands and feet stay at their solved position when a target is out of reach; enable stretch to let the endpoint follow the target. The stretch buttons insert stepped state keys even when auto-key is off
+- Targets and poles have no parent, so they do not inherit `Trans` motion. Existing independent rigs receive endpoint constraint and driver repairs on load
+- **Position IK Controls** evaluates independent limbs together, including Entire Animation, while retaining sequential matching for custom dependencies. Pose-tool refresh waits until matching finishes; solver precision and frame sampling are retained
 - **Bake & Remove IK** takes a limb selection (all present IK, legs only, arms only, arms and legs), samples the evaluated motion before removing controls, and leaves unrelated limb channels alone
 - Solver animation lives on hidden, nondeforming `BL_SUB_IK_*` bones; original bones blend to them through driven constraints
-- Regression suite: `blender --background --factory-startup --python-exit-code 1 --python tests/ik_regression.py`
+- Matching and pose-tool regressions: `python tests/ik_batch_matching.py` and `python tests/pose_tool_deferral.py`.
 
 ### GIF or Photo and Animation Navigation
 
@@ -118,6 +143,12 @@ The Timeline header includes FPS preset buttons. Their four values (and button v
 - **Refresh Bone Drawing** in Armature Data > Viewport Display works around invisible bones on imported rigs without retaining any rig edits
 - **Roll Value Copier** — copy bone roll from a source armature to a target (name-matched, optional selected-only)
 
+### Texture optimization
+
+Select an object with an Ultimate material, then use **Optimize Textures** in its material UI. Choose which assigned images to resize and how many times to halve each dimension; the dialog previews dimensions and total pixel reduction. Zero steps keeps the original size, and dimensions never fall below one pixel.
+
+Shared images are resized once and change in every material using them. Built-in defaults, linked images, unsupported image types, and unavailable data are skipped. Results support Undo and are packed into the file; **save the `.blend`** to keep them. Export textures afterward to write the resized `.nutexb` files.
+
 ### Armature Collection Presets
 
 The **Armature Collection Presets** panel in the Ultimate tab saves and restores an armature's organization and viewport setup. Presets can include scene collections and object placement, materials, bone collections, bone colors/custom shapes, and armature display settings. Each section can be enabled independently.
@@ -129,6 +160,7 @@ The **Armature Collection Presets** panel in the Ultimate tab saves and restores
 - Unmatched objects stay where they are unless **Move to Unmatched** is selected.
 - Presets preserve multiple object collection memberships and nested bone collections. Applying never deletes objects or collections and does not disturb collection links belonging exclusively to other scenes.
 - The list supports search, refresh, best-match selection, update, duplicate, rename, delete, multi-file import, and export.
+- **Link to Model Folder** associates a preset with one folder name in a model's import path. Import automatically applies the closest unique match; ambiguous matches warn and are skipped. Leave the link blank to disable it. Updating preserves the link; duplication clears it.
 
 ### Easy Facial Animation
 
@@ -160,6 +192,7 @@ Expy Kit lives in the Ultimate tab (always listed; most operators want Pose Mode
 - Import/export stage `light.nuanmb`, viewport preview, edit intensity/color on selected lights
 - **Drive Smash Viewport** (on by default) — Import Light Nuanmb also loads that file in Smash Viewport. Rotate `LightStg0` / change intensity or color and Smash Viewport updates after a short delay. **Training Lights** or **Load Stage Lights** in Render Properties pause live sync until you edit a Stage Tools light again
 - Ambient SH `.shpcanim` import/export, intensity/tint, vertex-paint local ambient, bake multipliers
+- **Import Battlefield Reference** adds stage geometry for judging fighter size and movement. Enter the fighter's in-game scale; the stage uses its reciprocal (a 0.5-scale fighter gets a 2× reference) and faces -X. The scale stays editable on a root empty in a separate reference collection; repeated imports add another reference. Reference geometry is not part of model export
 
 ### Animation data and Blender 4 / 5
 
@@ -169,18 +202,24 @@ Expy Kit lives in the Ultimate tab (always listed; most operators want Pose Mode
 - `ParamLabels.csv` lives outside the addon so updates do not wipe custom hashes (`%APPDATA%/Smash Ultimate Labels` on Windows)
 - **Append New Hashes** adds lowercase bone names, `bonecol` collision names, and child mesh names in a responsive batch; additional CSV destinations are configurable in the add-on preferences
 
-### Panel Presets and panel order
+### Panel Presets
 
-Two independent controls over the Ultimate tab itself.
+**Panel Presets** at the bottom of the Ultimate tab controls the whole layout of the tab: which panels are visible *and* what order they appear in.
 
-- **Panel Presets** (bottom of the Ultimate tab) decides which panels are *visible*. **All Panels**, **Animate**, and **Modeling** ship built in; add, duplicate, rename, and delete your own, tick panels on and off, and **Save Presets** writes them to your Blender config so other `.blend` files pick them up. The checklist applies immediately
-- The add-on preferences contain a persistent **Ultimate Sidebar Panel Order** list, which decides the *order*. Select a panel and move it with the up/down arrows; the chosen order is restored when the add-on loads in later Blender sessions
+- **All Panels**, **Animate**, and **Modeling** ship built in; add, duplicate, rename, and delete your own
+- The panel list is a single checklist: tick a panel to show it, and use the up/down arrows beside the list to move it. The reset arrow restores the add-on's default order for that preset
+- Each preset carries its own order, so switching presets relays out the tab
+- **Save Presets** writes them to your Blender config so other `.blend` files pick them up; presets also travel inside a saved `.blend`
+- Changes apply immediately. Panel Presets itself is never hidden or moved — it stays pinned at the bottom so a bad preset is always undoable
+- Layout restoration preserves child panels and works with Simple Tabs' renamed categories. An optional [Simple Tabs startup patch](patches/simple-tabs-immediate-startup.patch) is supplied for that separate add-on; it is not applied automatically
 
-The two work together: ordering never moves the Panel Presets panel itself, which stays pinned at the bottom.
+### Import, export, and matching performance
+
+Model import converts textures concurrently and groups vertex-weight writes. Animation import caches track data and avoids repeated pose evaluation where bone inheritance permits it; visibility drivers are replaced cleanly instead of accumulating duplicate variables. Model export reduces mode changes and mesh processing, while texture export uses up to four external encoders with temporary-file cleanup.
 
 ### Helper bones (`BL_*`)
 
-Any extra control you add (IK widgets, finger sliders, eye look, custom helpers) **must** be named with the `BL_` prefix. The rig already does this. Export skips `BL_*` bones so they never end up in a `.nusktb` or `.nuanmb`.
+Use the `BL_` prefix for custom helper bones that should be excluded from model and animation export. Internal solver bones already use `BL_SUB_IK_*`, but named hand/foot targets and poles can use names such as `HandIK` or `KneeIK`. Bake and remove IK through the provided operators before final export; Export Doctor warns when IK bones remain. The prefix excludes a bone, but does not bake its effect onto the exported bones.
 
 ## Shared with the main plugin
 
@@ -208,7 +247,7 @@ Tutorials for the shared import/export flow are on the [wiki](https://github.com
 
 ## System requirements
 
-64-bit **Blender 4.0** and **Blender 5.x** on Windows, Linux, and macOS (including Apple Silicon). Smash Viewport needs a working DX12 / Vulkan / Metal GPU stack on those platforms.
+64-bit **Blender 4.4+** and **Blender 5.x** on Windows, Linux, and macOS (including Apple Silicon). Smash Viewport needs a working DX12 / Vulkan / Metal GPU stack on those platforms.
 
 If Blender runs but the addon will not enable, open an issue on [this fork](https://github.com/CrusherD2/smash-ultimate-blender/issues).
 
@@ -216,9 +255,9 @@ If Blender runs but the addon will not enable, open an issue on [this fork](http
 
 ### Auto-updater
 
-This fork watches the **`animation-workflow`** branch (not GitHub Releases). When a new commit lands, **Update Available!** appears in the Ultimate tab with the changelog and **Download & Install Update**. It backs up the current install and restarts Blender.
+This fork watches the **`animation-workflow`** branch (not GitHub Releases). When a new commit lands with a higher add-on version, **Update Available!** appears in the Ultimate tab with the changelog and **Download & Install Update**. Equal or older remote versions do not trigger the panel. If version information cannot be read, the updater falls back to comparing commits. It backs up the current install and restarts Blender.
 
-If your installed version is newer than the one published on that branch — a local build with unreleased work, for instance — the panel stays hidden rather than offering an update that would replace newer code with older. Equal versions still update on new commits, and if the branch cannot be reached the usual commit check applies.
+Version comparison uses the exact remote commit being checked. A local build with an equal or higher version keeps the panel hidden; use manual installation if you intentionally want a different build with the same version.
 
 Smash Viewport binaries ship in that zip. After an update that changes them, quit Blender completely once so the new `.dll` / `.so` / `.dylib` can load.
 
@@ -232,7 +271,7 @@ Disable the addon, restart Blender, then Remove.
 
 ## In case of problems
 
-1. Export issues: [wiki: export issues](https://github.com/ssbucarlos/smash-ultimate-blender/wiki/Read-this-if-you-have-export-issues.-Or-want-to-avoid-Export-Issues)
+1. Export issues: run **Export Doctor** in the Ultimate tab, then consult [wiki: export issues](https://github.com/ssbucarlos/smash-ultimate-blender/wiki/Read-this-if-you-have-export-issues.-Or-want-to-avoid-Export-Issues)
 2. [Known issues](https://github.com/ssbucarlos/smash-ultimate-blender/wiki/Known-Blender-Issues)
 3. Fork-specific bugs: [CrusherD2/smash-ultimate-blender issues](https://github.com/CrusherD2/smash-ultimate-blender/issues)
 

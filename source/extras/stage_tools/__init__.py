@@ -1,9 +1,11 @@
+from . import battlefield_ref
 from . import light_nuanmb
 from . import panel
 from . import shpcanim
 
 
 classes = (
+    *battlefield_ref.classes,
     *light_nuanmb.classes,
     *shpcanim.classes,
     panel.SUB_PT_stage_tools,

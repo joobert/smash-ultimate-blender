@@ -138,6 +138,17 @@ class SUB_OP_vanilla_nusktb_selector(Operator, ImportHelper):
         default='*.nusktb',
         options={'HIDDEN'}
     )
+    def invoke(self, context, event):
+        from ..addon_preferences import get_addon_preferences
+        prefs = get_addon_preferences(context)
+        selected = context.scene.sub_scene_properties.vanilla_nusktb
+        if selected:
+            self.filepath = selected
+        elif prefs and prefs.default_vanilla_nusktb_folder:
+            self.filepath = os.path.join(bpy.path.abspath(prefs.default_vanilla_nusktb_folder), '')
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
     def execute(self, context):
         context.scene.sub_scene_properties.vanilla_nusktb = self.filepath
         return {'FINISHED'}      
@@ -194,11 +205,11 @@ class SUB_OP_model_exporter(Operator):
         name="Bone Linkage",
         description="Pick 'Order & Values' unless you intentionally edited the vanilla bones.",
         items=(
-            ('ORDER_AND_VALUES', "Order & Values", "Preserve the order and transforms of vanilla bones (recommended)"),
             ('ORDER_ONLY', "Order Only", "Preserve the order of vanilla bones but use bone transforms from Blender."),
+            ('ORDER_AND_VALUES', "Order & Values", "Preserve the order and transforms of vanilla bones (recommended)"),
             ('NO_LINK', "No Link", "Recreate the bone order and transforms from Blender (not recommended)."),
         ),
-        default='ORDER_AND_VALUES',
+        default='ORDER_ONLY',
     )
 
     optimize_mesh_weights_to_parent_bone: EnumProperty(
@@ -263,12 +274,22 @@ class SUB_OP_model_exporter(Operator):
 
     # Initially set the filename field to be nothing
     def invoke(self, context, _event):
+        from ..addon_preferences import model_export_folder
+        configured = model_export_folder(context.scene.sub_scene_properties.model_export_arma, context)
+        if configured:
+            self.directory = os.path.join(configured, '')
         if context.scene.sub_scene_properties.vanilla_nusktb == '':
             self.linked_nusktb_settings = 'NO_LINK'
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
     
     def execute(self, context):
+        # Preflight first, so a scene that cannot produce a valid model never
+        # gets as far as writing half a file set.
+        from ..doctor import preflight
+        if not preflight(context, self, 'MODEL'):
+            return {'CANCELLED'}
+
         start = time.perf_counter()
         with cProfile.Profile() as pr:
             export_model(self, context, self.directory, self.include_numdlb, self.include_numshb, self.include_numshexb,
@@ -345,13 +366,17 @@ def trim_material_labels(operator: Operator, ssbh_modl_data: ssbh_data_py.modl_d
 def weights_to_parent_bones(ssbh_mesh_data: ssbh_data_py.mesh_data.MeshData, ssbh_skel_data: ssbh_data_py.skel_data.SkelData):
     # https://github.com/ScanMountGoat/ssbh_data_py/blob/main/examples/parent_bone_to_weights.py
     bones: dict[str, ssbh_data_py.skel_data.BoneData] = {bone.name : bone for bone in ssbh_skel_data.bones}
+    inverse_world_by_name = {}
     for mesh_object in ssbh_mesh_data.objects:
         if len(mesh_object.bone_influences) != 1:
             continue
         bone_name = mesh_object.bone_influences[0].bone_name
-        bone_data = bones.get(bone_name)
-        bone_matrix = ssbh_skel_data.calculate_world_transform(bone_data)
-        inverted_bone_matrix = np.linalg.inv(bone_matrix).astype(np.float32, copy=False)
+        inverted_bone_matrix = inverse_world_by_name.get(bone_name)
+        if inverted_bone_matrix is None:
+            bone_data = bones.get(bone_name)
+            bone_matrix = ssbh_skel_data.calculate_world_transform(bone_data)
+            inverted_bone_matrix = np.linalg.inv(bone_matrix).astype(np.float32, copy=False)
+            inverse_world_by_name[bone_name] = inverted_bone_matrix
         for position in mesh_object.positions:
             position.data = ssbh_data_py.mesh_data.transform_points(position.data, inverted_bone_matrix)
         
@@ -544,18 +569,18 @@ def export_model(operator: bpy.types.Operator, context, directory, include_numdl
 
     arma.data.pose_position = old_pose_position
 
-def create_skel_and_prc(operator, context, linked_nusktb_settings, folder) -> tuple[ssbh_data_py.skel_data.SkelData, Any]:
+def create_skel_and_prc(operator, context, linked_nusktb_settings, folder) -> tuple[ssbh_data_py.skel_data.SkelData | None, Any]:
     try:
         ssbh_skel_data, prc = make_skel(operator, context, linked_nusktb_settings)
     except RuntimeError as e:
         operator.report({'ERROR'},  f'Failed to make skel for export, Error="{e}" ; Traceback=\n{traceback.format_exc()}')
-        return
+        return (None, None)
 
     # The uniform buffer for bone transformations in the skinning shader has a fixed size.
     # Limit exports to 511 bones to prevent rendering issues and crashes in game.
     if len(ssbh_skel_data.bones) > 511:
         operator.report({'ERROR'}, f'{len(ssbh_skel_data.bones)} bones exceeds the maximum supported count of 511.')
-        return
+        return (None, None)
 
     """path = str(folder.joinpath('model.nusktb'))
     try:
@@ -1015,7 +1040,7 @@ def process_mesh(operator: Operator, context: Context, mesh_object_copy: Object,
     bmesh.ops.delete(bm, geom=unlinked_verts, context='VERTS')
     bm.to_mesh(mesh_object_copy.data)
     mesh_object_copy.data.update()
-    bm.clear()
+    bm.free()
     
     # Get the custom normals from the original mesh.
     # We use the copy here since applying transforms alters the normals.
@@ -1060,26 +1085,23 @@ def process_mesh(operator: Operator, context: Context, mesh_object_copy: Object,
     bmesh.ops.delete(bm, geom=unlinked_verts, context='VERTS')
     bm.to_mesh(mesh_object_copy.data)
     mesh_object_copy.data.update()
-    bm.clear()
+    bm.free()
 
     # Split mesh by material
-    bm = bmesh.new()
-    bm.from_mesh(mesh_object_copy.data)
-    material_indices: set[int] = {f.material_index for f in bm.faces}
-    #bm.to_mesh(mesh_object_copy.data)
-    #mesh_object_copy.data.update()
-    bm.clear()
+    material_indices: set[int] = {f.material_index for f in mesh_object_copy.data.polygons}
     split_meshes: set[Object] = set()
     for material_index in material_indices:
         dest_obj: bpy.types.Object = mesh_object_copy.copy()
         dest_obj.data: bpy.types.Mesh = mesh_object_copy.data.copy()
-        dest_bm = bmesh.new()
-        dest_bm.from_mesh(dest_obj.data)
-        dest_faces_to_split = [f for f in dest_bm.faces if f.material_index != material_index]
-        if len(dest_faces_to_split) > 0:
-            bmesh.ops.delete(dest_bm, geom=dest_faces_to_split, context='FACES')
-            dest_bm.to_mesh(dest_obj.data)
-        dest_bm.clear()
+        # A single-material mesh already contains exactly the desired faces.
+        if len(material_indices) > 1:
+            dest_bm = bmesh.new()
+            dest_bm.from_mesh(dest_obj.data)
+            dest_faces_to_split = [f for f in dest_bm.faces if f.material_index != material_index]
+            if len(dest_faces_to_split) > 0:
+                bmesh.ops.delete(dest_bm, geom=dest_faces_to_split, context='FACES')
+                dest_bm.to_mesh(dest_obj.data)
+            dest_bm.free()
         dest_obj.data.update()
         # Check if the mesh has material slots before trying to access them
         if len(dest_obj.material_slots) > 0:
@@ -1429,11 +1451,11 @@ def add_duplicate_normal_edges(edges_to_split, bm):
 
 
 def split_duplicate_loop_attributes(mesh: bpy.types.Object):
-    bpy.context.view_layer.objects.active = mesh
-    bpy.ops.object.mode_set(mode = 'EDIT')
-
     me: bpy.types.Mesh = mesh.data
-    bm = bmesh.from_edit_mesh(me)
+    # Work on an owned BMesh instead of entering/exiting Edit Mode for every
+    # mesh. Mode changes unnecessarily rebuild the scene's dependency graph.
+    bm = bmesh.new()
+    bm.from_mesh(me)
 
     edges_to_split: list[bmesh.types.BMEdge] = []
 
@@ -1450,12 +1472,10 @@ def split_duplicate_loop_attributes(mesh: bpy.types.Object):
     # This check also seems to prevent a potential crash.
     if len(edges_to_split) > 0:
         bmesh.ops.split_edges(bm, edges=edges_to_split)
-        bmesh.update_edit_mesh(me)
+        bm.to_mesh(me)
+        me.update()
 
     bm.free()
-
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.context.view_layer.objects.active = None
 
     # Check if any edges were split.
     return len(edges_to_split) > 0

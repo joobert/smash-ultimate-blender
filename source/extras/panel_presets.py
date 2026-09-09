@@ -1,4 +1,9 @@
-"""Ultimate sidebar Panel Presets — show/hide top-level Ultimate panels."""
+"""Ultimate sidebar Panel Presets — show, hide and order top-level Ultimate panels.
+
+A preset owns both halves of the sidebar layout: which panels are visible and
+what order they appear in. The panel registry and the ``bl_order`` writes live
+in ``source/panel_order.py``; everything user-facing lives here.
+"""
 
 from __future__ import annotations
 
@@ -15,28 +20,12 @@ from bpy.props import (
 )
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 
-# Always visible — never filtered by presets
-_PRESETS_PANEL_ID = "SUB_PT_panel_presets"
-
-# Preferred display order / labels for known panels
-_PANEL_META = (
-    ("SUB_PT_import_model", "Model Importer"),
-    ("SUB_PT_export_model", "Model Exporter"),
-    ("SUB_PT_import_anim", "Animation Importer"),
-    ("SUB_PT_raw_animations", "Raw Animations"),
-    ("SUB_PT_export_anim", "Animation Exporter"),
-    ("SUB_PT_animation_tools", "Animation Tools"),
-    ("SUB_PT_model_tools", "Model Tools"),
-    ("SUB_PT_collection_presets", "Armature Collection Presets"),
-    ("SUB_PT_misc_utilities", "Misc."),
-    ("SUB_PT_face_picker", "Easy Facial Animation"),
-    ("SUB_PT_retargeting_main", "Retargeting"),
-    ("SUB_PT_stage_tools", "Stage Tools"),
-    ("SUB_PT_swing_io", "Swing"),
-    ("SUB_PT_ultimate_exo_skel", "Magic Exo Skel Maker"),
-    ("SUB_PT_reimport_materials", "Material Re-Importer"),
-    ("SUB_PT_attribute_renamer", "Attribute Renamer"),
-    ("SUB_PT_update_plugin", "Update Available!"),
+from ..panel_order import (
+    PRESETS_PANEL_ID as _PRESETS_PANEL_ID,
+    apply_order,
+    reset as reset_panel_order,
+    default_order,
+    discover_panels,
 )
 
 _ANIMATE_DEFAULT_VISIBLE = {
@@ -73,54 +62,9 @@ def _tag_redraw(context=None):
                 area.tag_redraw()
 
 
-def _panel_class_id(cls) -> str:
-    """Stable id for preset matching / poll wrapping."""
-    explicit = cls.__dict__.get("bl_idname")
-    if explicit:
-        return str(explicit)
-    name = getattr(cls, "__name__", "") or ""
-    return name
-
-
 def discover_controllable_panels():
-    """Top-level Ultimate VIEW_3D panels (excluding Panel Presets)."""
-    meta = {pid: label for pid, label in _PANEL_META}
-    found = {}
-
-    for attr in dir(bpy.types):
-        cls = getattr(bpy.types, attr, None)
-        if not isinstance(cls, type):
-            continue
-        try:
-            if not issubclass(cls, Panel):
-                continue
-        except TypeError:
-            continue
-        if getattr(cls, "bl_category", None) != "Ultimate":
-            continue
-        if getattr(cls, "bl_space_type", None) != "VIEW_3D":
-            continue
-        if getattr(cls, "bl_parent_id", None):
-            continue
-        panel_id = _panel_class_id(cls) or attr
-        if not panel_id or panel_id == _PRESETS_PANEL_ID:
-            continue
-        # Prefer the primary bpy.types attribute matching the class name
-        if attr not in {panel_id, getattr(cls, "bl_idname", None), cls.__name__}:
-            continue
-        label = meta.get(panel_id) or getattr(cls, "bl_label", None) or panel_id
-        found[panel_id] = (cls, label)
-
-    ordered = []
-    seen = set()
-    for panel_id, label in _PANEL_META:
-        if panel_id in found:
-            ordered.append((panel_id, found[panel_id][0], found[panel_id][1]))
-            seen.add(panel_id)
-    for panel_id, (cls, label) in sorted(found.items(), key=lambda item: item[1][1].lower()):
-        if panel_id not in seen:
-            ordered.append((panel_id, cls, label))
-    return ordered
+    """Top-level Ultimate panels a preset can show, hide and order."""
+    return discover_panels()
 
 
 def _preset_collection(scene):
@@ -159,7 +103,11 @@ def panel_allowed(context, panel_id: str) -> bool:
 
 
 def _sync_preset_panels(preset, *, default_enabled=True, enabled_ids=None):
-    """Ensure preset.panels matches currently known Ultimate panels."""
+    """Ensure preset.panels matches currently known Ultimate panels.
+
+    The collection's own order is the sidebar order, so existing entries keep
+    their positions and newly registered panels are appended in default order.
+    """
     known = discover_controllable_panels()
     known_ids = {pid for pid, _cls, _label in known}
 
@@ -179,11 +127,50 @@ def _sync_preset_panels(preset, *, default_enabled=True, enabled_ids=None):
                 entry.enabled = bool(default_enabled)
         entry.label = label
 
+    if len(preset.panels):
+        preset.panel_index = max(0, min(preset.panel_index, len(preset.panels) - 1))
+    else:
+        preset.panel_index = 0
+
+
+def _reorder_preset_panels(preset, ordered_ids):
+    """Move preset.panels into ``ordered_ids``; unlisted entries keep the tail."""
+    positions = {entry.panel_id: index for index, entry in enumerate(preset.panels)}
+    target = 0
+    for panel_id in ordered_ids:
+        current = positions.get(panel_id)
+        if current is None:
+            continue
+        if current != target:
+            preset.panels.move(current, target)
+            positions = {entry.panel_id: index for index, entry in enumerate(preset.panels)}
+        target += 1
+
+
+def active_panel_order(scene):
+    """The panel ids of the active preset, in sidebar order."""
+    preset = _active_preset(scene)
+    if preset is None or not len(preset.panels):
+        return default_order()
+    return [entry.panel_id for entry in preset.panels]
+
+
+def apply_active_order(scene, *, defer=True):
+    """Push the active preset's order onto the sidebar."""
+    if scene is None:
+        return
+    try:
+        apply_order(active_panel_order(scene), defer=defer)
+    except Exception as e:
+        print(f"Smash_ultimate_blender: Could not apply panel order: {e}")
+
 
 def serialize_presets(scene) -> dict:
     presets = _preset_collection(scene)
+    # v2 adds ordering: the panels list is written in sidebar order, so a v1
+    # file still loads and simply carries the default order.
     payload = {
-        "version": 1,
+        "version": 2,
         "active": int(getattr(scene, "sub_panel_presets_index", 0) or 0),
         "presets": [],
     }
@@ -233,6 +220,9 @@ def apply_presets_payload(scene, payload: dict):
                 entry = by_id.get(str(p.get("panel_id")))
                 if entry is not None:
                     entry.enabled = bool(p.get("enabled", False))
+        _reorder_preset_panels(
+            preset, [str(p.get("panel_id")) for p in (item.get("panels") or [])]
+        )
 
     if not len(presets):
         ensure_default_presets(scene, force_builtins=True)
@@ -312,6 +302,8 @@ def _seed_presets_timer():
     try:
         for scene in bpy.data.scenes:
             ensure_default_presets(scene)
+        # Ordering is global, so it follows whichever scene the user is in.
+        apply_active_order(getattr(bpy.context, "scene", None), defer=False)
         _tag_redraw()
     except Exception:
         pass
@@ -333,6 +325,8 @@ def _on_preset_index_update(self, context):
         ensure_default_presets(self)
     except Exception:
         schedule_seed_presets()
+    # A preset carries its own order, so switching presets relays out the tab.
+    apply_active_order(self)
     _tag_redraw(context)
 
 
@@ -361,6 +355,8 @@ class SUB_PG_panel_preset(PropertyGroup):
     )
     is_builtin: BoolProperty(name="Builtin", default=False)
     panels: CollectionProperty(type=SUB_PG_panel_preset_entry)
+    # Selection for the panel list; the collection's order is the sidebar order.
+    panel_index: IntProperty(name="Panel", default=0)
 
 
 class SUB_UL_panel_presets(UIList):
@@ -371,6 +367,18 @@ class SUB_UL_panel_presets(UIList):
         row.prop(item, "name", text="", emboss=False, icon="PRESET")
         if item.show_all:
             row.label(text="", icon="HIDE_OFF")
+
+
+class SUB_UL_panel_preset_panels(UIList):
+    bl_idname = "SUB_UL_panel_preset_panels"
+
+    def draw_item(self, _context, layout, data, item, _icon, _active_data, _active_propname, _index):
+        row = layout.row(align=True)
+        # Show All overrides the checkboxes, but the order still applies.
+        toggle = row.row(align=True)
+        toggle.enabled = not getattr(data, "show_all", False)
+        toggle.prop(item, "enabled", text="")
+        row.label(text=item.label or item.panel_id)
 
 
 class SUB_OP_panel_preset_ensure(Operator):
@@ -513,6 +521,58 @@ class SUB_OP_panel_preset_select_all(Operator):
         return {"FINISHED"}
 
 
+class SUB_OP_panel_preset_move_panel(Operator):
+    bl_idname = "sub.panel_preset_move_panel"
+    bl_label = "Move Panel"
+    bl_description = "Move the selected panel in the Ultimate sidebar order"
+    bl_options = {"REGISTER", "UNDO"}
+
+    direction: StringProperty(default="UP", options={"HIDDEN"})
+
+    @classmethod
+    def poll(cls, context):
+        preset = _active_preset(context.scene)
+        return preset is not None and len(preset.panels) > 1
+
+    def execute(self, context):
+        scene = context.scene
+        preset = _active_preset(scene)
+        if preset is None:
+            return {"CANCELLED"}
+        index = max(0, min(int(preset.panel_index), len(preset.panels) - 1))
+        target = index - 1 if self.direction == "UP" else index + 1
+        if target < 0 or target >= len(preset.panels):
+            return {"CANCELLED"}
+        preset.panels.move(index, target)
+        preset.panel_index = target
+        apply_active_order(scene)
+        _tag_redraw(context)
+        return {"FINISHED"}
+
+
+class SUB_OP_panel_preset_reset_order(Operator):
+    bl_idname = "sub.panel_preset_reset_order"
+    bl_label = "Reset Panel Order"
+    bl_description = "Restore the add-on's default Ultimate sidebar panel order for this preset"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        preset = _active_preset(context.scene)
+        return preset is not None and len(preset.panels) > 0
+
+    def execute(self, context):
+        scene = context.scene
+        preset = _active_preset(scene)
+        if preset is None:
+            return {"CANCELLED"}
+        _reorder_preset_panels(preset, default_order())
+        preset.panel_index = 0
+        apply_active_order(scene)
+        _tag_redraw(context)
+        return {"FINISHED"}
+
+
 def _install_poll_wrappers():
     """Wrap top-level Ultimate panel polls so presets can hide them.
 
@@ -576,60 +636,6 @@ def _uninstall_poll_wrappers():
     _wrapped_polls.clear()
 
 
-def repair_retargeting_panel_hierarchy():
-    """Re-register Retargeting panels in parent-first order if children were orphaned.
-
-    A previous Panel Presets wrap used unregister/register on the Retargeting
-    parent, which left Bind To / Expy Mapping / Actions as loose top-level panels.
-    """
-    try:
-        from .. import retargeting
-        panels = list(getattr(retargeting, "custom_panels", []) or [])
-    except Exception:
-        return False
-    if not panels:
-        return False
-
-    # Unregister children before parents (reverse), then register parent-first.
-    for cls in reversed(panels):
-        try:
-            bpy.utils.unregister_class(cls)
-        except Exception:
-            pass
-    for cls in panels:
-        try:
-            bpy.utils.register_class(cls)
-        except Exception:
-            pass
-    return True
-
-
-def repair_updater_panel_hierarchy():
-    """Re-nest Plugin Updater under Update Available! after a bad wrap."""
-    try:
-        from ..updater import ui as updater_ui
-    except Exception:
-        return False
-    panels = []
-    for name in ("SUB_PT_update_plugin", "SUB_PT_updater_settings"):
-        cls = getattr(updater_ui, name, None)
-        if cls is not None:
-            panels.append(cls)
-    if not panels:
-        return False
-    for cls in reversed(panels):
-        try:
-            bpy.utils.unregister_class(cls)
-        except Exception:
-            pass
-    for cls in panels:
-        try:
-            bpy.utils.register_class(cls)
-        except Exception:
-            pass
-    return True
-
-
 class SUB_PT_panel_presets(Panel):
     bl_label = "Panel Presets"
     bl_idname = _PRESETS_PANEL_ID
@@ -653,7 +659,7 @@ class SUB_PT_panel_presets(Panel):
             schedule_seed_presets()
             return
 
-        layout.label(text="Active preset controls which Ultimate panels are visible.")
+        layout.label(text="The active preset sets which Ultimate panels show and in what order.")
 
         row = layout.row()
         row.template_list(
@@ -685,32 +691,45 @@ class SUB_PT_panel_presets(Panel):
         if preset.is_builtin:
             name_row.enabled = False
 
-        if preset.show_all and preset.is_builtin:
-            box.label(text="Built-in: every Ultimate panel is visible.", icon="INFO")
-            return
-
-        box.prop(preset, "show_all", text="Show All Panels")
-        if preset.show_all:
-            box.label(text="Every Ultimate panel is visible.", icon="INFO")
-            return
+        # Built-in Show All is not editable, but its order still is.
+        if not preset.is_builtin:
+            box.prop(preset, "show_all", text="Show All Panels")
 
         if not len(preset.panels):
             box.operator("sub.panel_preset_ensure", text="Refresh Panel List", icon="FILE_REFRESH")
             schedule_seed_presets()
             return
 
-        row = box.row(align=True)
-        op = row.operator("sub.panel_preset_select_all", text="Check All")
+        toggles = box.row(align=True)
+        toggles.enabled = not preset.show_all
+        op = toggles.operator("sub.panel_preset_select_all", text="Check All")
         op.enable = True
-        op = row.operator("sub.panel_preset_select_all", text="Uncheck All")
+        op = toggles.operator("sub.panel_preset_select_all", text="Uncheck All")
         op.enable = False
 
-        col = box.column(align=True)
-        for entry in preset.panels:
-            col.prop(entry, "enabled", text=entry.label or entry.panel_id)
+        row = box.row()
+        row.template_list(
+            "SUB_UL_panel_preset_panels",
+            "",
+            preset,
+            "panels",
+            preset,
+            "panel_index",
+            rows=8,
+        )
+        controls = row.column(align=True)
+        op = controls.operator("sub.panel_preset_move_panel", text="", icon="TRIA_UP")
+        op.direction = "UP"
+        op = controls.operator("sub.panel_preset_move_panel", text="", icon="TRIA_DOWN")
+        op.direction = "DOWN"
+        controls.separator()
+        controls.operator("sub.panel_preset_reset_order", text="", icon="LOOP_BACK")
+
+        if preset.show_all:
+            box.label(text="Every Ultimate panel is visible. Arrows still reorder them.", icon="INFO")
 
         box.label(
-            text="Checklist applies immediately. Save Presets for other .blend files.",
+            text="Changes apply immediately. Save Presets for other .blend files.",
             icon="INFO",
         )
 
@@ -719,6 +738,7 @@ classes = (
     SUB_PG_panel_preset_entry,
     SUB_PG_panel_preset,
     SUB_UL_panel_presets,
+    SUB_UL_panel_preset_panels,
     SUB_OP_panel_preset_ensure,
     SUB_OP_panel_preset_save,
     SUB_OP_panel_preset_load,
@@ -726,16 +746,20 @@ classes = (
     SUB_OP_panel_preset_remove,
     SUB_OP_panel_preset_duplicate,
     SUB_OP_panel_preset_select_all,
+    SUB_OP_panel_preset_move_panel,
+    SUB_OP_panel_preset_reset_order,
     SUB_PT_panel_presets,
 )
 
 
 @persistent
 def _panel_presets_load_post(_dummy):
-    schedule_seed_presets()
+    # File data is available now. Finish Ultimate's layout before a tab manager
+    # restores category order on the next event-loop tick.
+    if bpy.app.timers.is_registered(_seed_presets_timer):
+        bpy.app.timers.unregister(_seed_presets_timer)
+    _seed_presets_timer()
     try:
-        repair_retargeting_panel_hierarchy()
-        repair_updater_panel_hierarchy()
         _install_poll_wrappers()
     except Exception:
         pass
@@ -753,16 +777,11 @@ def register():
     if not hasattr(bpy.types.Scene, "sub_panel_presets_index"):
         bpy.types.Scene.sub_panel_presets_index = IntProperty(
             name="Panel Preset",
-            description="Active Ultimate panel visibility preset",
+            description="Active Ultimate sidebar layout preset (visibility and order)",
             default=0,
             update=_on_preset_index_update,
         )
 
-    try:
-        repair_retargeting_panel_hierarchy()
-        repair_updater_panel_hierarchy()
-    except Exception:
-        pass
     _install_poll_wrappers()
 
     if _panel_presets_load_post not in bpy.app.handlers.load_post:
@@ -772,10 +791,13 @@ def register():
 
 
 def unregister():
+    global _seed_scheduled
+    _seed_scheduled = False
     if _panel_presets_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_panel_presets_load_post)
     if bpy.app.timers.is_registered(_seed_presets_timer):
         bpy.app.timers.unregister(_seed_presets_timer)
+    reset_panel_order()
 
     _uninstall_poll_wrappers()
     if hasattr(bpy.types.Scene, "sub_panel_presets_index"):
