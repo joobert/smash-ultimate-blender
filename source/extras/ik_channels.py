@@ -67,7 +67,14 @@ def create_controls(context, obj, limbs='BOTH'):
         if all(n in obj.data.bones for n in names):
             jobs.append((kind, names, ('FootIK' if kind == 'LEGS' else 'HandIK') + suffix,
                          ('KneeIK' if kind == 'LEGS' else 'ArmIK') + suffix))
-    with rig._disable_autokey(context), anim_layers_compat.anim_layers_paused():
+    # Existing controls may have user-authored dependencies or animation. Only
+    # freshly generated controls are eligible for the independent fast path.
+    fresh_controls = all(
+        name not in obj.data.bones
+        for _, names, target, pole in jobs
+        for name in (*(PREFIX + n for n in names), target, pole)
+    )
+    with rig.defer_pose_tool_updates(), rig._disable_autokey(context), anim_layers_compat.anim_layers_paused():
         bpy.ops.object.mode_set(mode='EDIT')
         bones = obj.data.edit_bones
         for _, names, target, pole in jobs:
@@ -94,10 +101,9 @@ def create_controls(context, obj, limbs='BOTH'):
             for n in (target, pole):
                 collection.assign(obj.data.bones[n])
                 obj.data.bones[n].color.palette = 'THEME01'
-        ensure(obj, context, limbs)
         if jobs:
             # Seed the new controls from the current FK pose before enabling IK.
-            match(context, obj, limbs, entire=False, key=True)
+            match(context, obj, limbs, entire=False, key=True, _batch=fresh_controls)
             rig._key_use_ik(obj, context.scene.frame_current, limbs=limbs, enabled=True)
             rig._set_ik_enabled(context, obj, True, limbs=limbs)
             context.view_layer.update()
@@ -326,7 +332,188 @@ def clean_animation(obj, limbs='BOTH', tolerance=1e-4):
     return removed
 
 
-def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False):
+def _can_batch_match(obj, jobs):
+    """Only combine evaluations when each limb reads independent pose inputs.
+
+    Custom drivers, external constraints, and cross-limb dependencies retain the
+    sequential path. Output constraints have already been muted by match().
+    """
+    if len(jobs) < 2 or obj.parent or obj.constraints:
+        return False
+    owners = {}
+    for index, (_, names, target, pole) in enumerate(jobs):
+        for name in (*(PREFIX + n for n in names), target, pole):
+            if name in owners:
+                return False
+            owners[name] = index
+    props = {'sub_use_ik_arms', 'sub_use_ik_legs',
+             'sub_ik_stretch_arms', 'sub_ik_stretch_legs'}
+    if obj.data.animation_data and obj.data.animation_data.drivers:
+        return False
+    if obj.animation_data and obj.animation_data.action:
+        from ..anim.fcurve_compat import get_all_action_fcurves
+        for curve in get_all_action_fcurves(obj.animation_data.action, id_type='OBJECT'):
+            # Animated constraint settings can change dependencies after the
+            # initial check. Our own pole-angle keys only affect their own limb.
+            if '.constraints[' in curve.data_path:
+                if not any(
+                    curve.data_path == obj.pose.bones[PREFIX + names[1]].constraints['SUB IK Solve'].path_from_id() + '.pole_angle'
+                    for _, names, _, _ in jobs
+                ):
+                    return False
+    for curve in obj.animation_data.drivers if obj.animation_data else ():
+        driver = curve.driver
+        if not curve.data_path.endswith('.influence') or len(driver.variables) != 1:
+            return False
+        var = driver.variables[0]
+        if (driver.type != 'SCRIPTED' or driver.expression != var.name
+                or var.type != 'SINGLE_PROP' or var.targets[0].id != obj.data
+                or var.targets[0].data_path not in props):
+            return False
+    for bone in obj.pose.bones:
+        owner = owners.get(bone.name)
+        if bone.parent and bone.parent.name in owners:
+            if owner != owners[bone.parent.name]:
+                return False
+        for con in bone.constraints:
+            # Only the output blends stay muted throughout matching. Check all
+            # other constraints, including ones animated from muted to active.
+            if (con.mute and con.name == OUTPUT and con.type == 'COPY_TRANSFORMS'
+                    and con.target == obj and con.subtarget == PREFIX + bone.name):
+                continue
+            if con.type not in {'COPY_TRANSFORMS', 'COPY_LOCATION', 'COPY_ROTATION',
+                                'COPY_SCALE', 'DAMPED_TRACK', 'IK'}:
+                return False
+            if getattr(con, 'use_bbone_shape', False):
+                return False
+            if con.type == 'IK' and (owner is None or con.chain_count != 2):
+                return False
+            targets = [(con.target, con.subtarget)]
+            if con.type == 'IK':
+                targets.append((con.pole_target, con.pole_subtarget))
+            for target, name in targets:
+                if target is None:
+                    continue
+                if target != obj or not name:
+                    return False
+                if name in owners and owners[name] != owner:
+                    return False
+    return True
+
+
+def _evaluate_match_steps(context, steps, batch):
+    if not batch:
+        for step in steps:
+            for _ in step:
+                context.view_layer.update()
+        return
+    pending = steps
+    while pending:
+        waiting = []
+        for step in pending:
+            try:
+                next(step)
+            except StopIteration:
+                continue
+            waiting.append(step)
+        if waiting:
+            context.view_layer.update()
+        pending = waiting
+
+
+def _match_chain_steps(obj, job, matrices, frame, key, previous_q, previous_pole, previous_angle):
+    """Yield at evaluation barriers; preserve each chain's original solve order."""
+    kind, names, target, pole = job
+    solver = [obj.pose.bones[PREFIX + name] for name in names]
+    con = solver[1].constraints['SUB IK Solve']
+    con.mute = True
+    for endpoint in end_constraints(solver[2]):
+        endpoint.mute = True
+    yield
+    for pb, name in zip(solver, names):
+        pb.matrix = matrices[name]
+        yield
+    # Independent seed channels preserve animated bone length,
+    # translation and axial twist without reading FK during playback.
+    if key:
+        for pb in solver:
+            _key(pb, frame, previous_q)
+    root, mid, end = [matrices[n].translation for n in names]
+    axis = end - root
+    if axis.length < 1e-8:
+        axis = matrices[names[0]].to_3x3().col[1].normalized()
+    else:
+        axis.normalize()
+    bend = mid - root - axis * (mid - root).dot(axis)
+    if bend.length < max((mid-root).length, 1.0) * 1e-5:
+        bend = previous_pole.get(target, matrices[names[0]].to_3x3().col[0]).copy()
+        bend -= axis * bend.dot(axis)
+        if bend.length < 1e-8:
+            bend = axis.orthogonal()
+    bend.normalize()
+    previous_pole[target] = bend.copy()
+    control = obj.pose.bones[target]
+    control.rotation_mode = 'QUATERNION'
+    control.matrix = matrices[names[2]]
+    pole_pb = obj.pose.bones[pole]
+    m = pole_pb.matrix.copy()
+    m.translation = mid + bend * max((mid-root).length + (end-mid).length, 0.5)
+    pole_pb.matrix = m
+    con.mute = False
+    for endpoint in end_constraints(solver[2]):
+        endpoint.mute = False
+    con.pole_angle = 0.0
+    yield
+    # Angle from the zero-angle solve to the desired bend plane.
+    delta = _angle(solver[1].matrix.translation-root, mid-root, axis)
+    if (mid-root-axis*(mid-root).dot(axis)).length < 1e-5:
+        delta = _angle(solver[0].matrix.to_3x3().col[0], matrices[names[0]].to_3x3().col[0], axis)
+    # Repeated candidates do not need another scene evaluation.
+    errors = {}
+    def error(angle):
+        if angle in errors:
+            return errors[angle]
+        con.pole_angle = math.atan2(math.sin(angle), math.cos(angle))
+        yield
+        score = sum(sum((solver[j].matrix.col[i]-matrices[names[j]].col[i]).length_squared for i in range(4)) for j in (0, 1))
+        errors[angle] = score
+        return score
+    def best(candidates):
+        scores = []
+        for candidate in candidates:
+            scores.append((candidate, (yield from error(candidate))))
+        return min(scores, key=lambda pair: pair[1])[0]
+    candidates = [delta, -delta, previous_angle.get(target, 0.0)]
+    angle = yield from best(candidates)
+    # Refine both bone orientations, not just the knee position.
+    # This handles axial twist and near-straight chains where a
+    # position-only pole test has almost no useful signal.
+    if (yield from error(angle)) > 1e-9:
+        lo, hi = angle - .2, angle + .2
+        ratio = (math.sqrt(5.0)-1.0)*.5
+        a, b = hi-ratio*(hi-lo), lo+ratio*(hi-lo)
+        fa = yield from error(a)
+        fb = yield from error(b)
+        for _ in range(18):
+            if fa < fb:
+                hi, b, fb = b, a, fa
+                a = hi-ratio*(hi-lo)
+                fa = yield from error(a)
+            else:
+                lo, a, fa = a, b, fb
+                b = lo+ratio*(hi-lo)
+                fb = yield from error(b)
+        angle = yield from best((angle, a, b))
+    con.pole_angle = math.atan2(math.sin(angle), math.cos(angle))
+    yield
+    previous_angle[target] = angle
+    if key:
+        _key(control, frame, previous_q)
+        _key(pole_pb, frame, previous_q)
+        con.keyframe_insert('pole_angle', frame=frame, group=solver[1].name)
+
+
+def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch=False):
     from . import create_animation_rig as rig, anim_layers_compat
     from ..anim.fcurve_compat import get_all_action_fcurves
     ensure(obj, context, limbs)
@@ -342,9 +529,10 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False):
     samples = {}
     previous_q, previous_pole, previous_angle = {}, {}, {}
     try:
-        with rig._disable_autokey(context), anim_layers_compat.bind_driving_action_for_bake(obj, context):
+        with rig.defer_pose_tool_updates(), rig._disable_autokey(context), anim_layers_compat.bind_driving_action_for_bake(obj, context):
             for con, _ in states:
                 con.mute = True
+            batch = _batch and _can_batch_match(obj, jobs)
             # Capture the entire source before writing any destination channels.
             for frame in frames:
                 scene.frame_set(frame)
@@ -352,82 +540,12 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False):
                 samples[frame] = {name: obj.pose.bones[name].matrix.copy() for _, names, _, _ in jobs for name in names}
             for frame, matrices in samples.items():
                 scene.frame_set(frame)
-                for kind, names, target, pole in jobs:
-                    solver = [obj.pose.bones[PREFIX + name] for name in names]
-                    con = solver[1].constraints['SUB IK Solve']
-                    con.mute = True
-                    for endpoint in end_constraints(solver[2]):
-                        endpoint.mute = True
-                    context.view_layer.update()
-                    for pb, name in zip(solver, names):
-                        pb.matrix = matrices[name]
-                        context.view_layer.update()
-                    # Independent seed channels preserve animated bone length,
-                    # translation and axial twist without reading FK during playback.
-                    if key:
-                        for pb in solver:
-                            _key(pb, frame, previous_q)
-                    root, mid, end = [matrices[n].translation for n in names]
-                    axis = end - root
-                    if axis.length < 1e-8:
-                        axis = matrices[names[0]].to_3x3().col[1].normalized()
-                    else:
-                        axis.normalize()
-                    bend = mid - root - axis * (mid - root).dot(axis)
-                    if bend.length < max((mid-root).length, 1.0) * 1e-5:
-                        bend = previous_pole.get(target, matrices[names[0]].to_3x3().col[0]).copy()
-                        bend -= axis * bend.dot(axis)
-                        if bend.length < 1e-8:
-                            bend = axis.orthogonal()
-                    bend.normalize()
-                    previous_pole[target] = bend.copy()
-                    control = obj.pose.bones[target]
-                    control.rotation_mode = 'QUATERNION'
-                    control.matrix = matrices[names[2]]
-                    pole_pb = obj.pose.bones[pole]
-                    m = pole_pb.matrix.copy()
-                    m.translation = mid + bend * max((mid-root).length + (end-mid).length, 0.5)
-                    pole_pb.matrix = m
-                    con.mute = False
-                    for endpoint in end_constraints(solver[2]):
-                        endpoint.mute = False
-                    con.pole_angle = 0.0
-                    context.view_layer.update()
-                    # Angle from the zero-angle solve to the desired bend plane.
-                    delta = _angle(solver[1].matrix.translation-root, mid-root, axis)
-                    if (mid-root-axis*(mid-root).dot(axis)).length < 1e-5:
-                        delta = _angle(solver[0].matrix.to_3x3().col[0], matrices[names[0]].to_3x3().col[0], axis)
-                    def error(angle):
-                        con.pole_angle = math.atan2(math.sin(angle), math.cos(angle))
-                        context.view_layer.update()
-                        return sum(sum((solver[j].matrix.col[i]-matrices[names[j]].col[i]).length_squared for i in range(4)) for j in (0, 1))
-                    candidates = [delta, -delta, previous_angle.get(target, 0.0)]
-                    angle = min(candidates, key=error)
-                    # Refine both bone orientations, not just the knee position.
-                    # This handles axial twist and near-straight chains where a
-                    # position-only pole test has almost no useful signal.
-                    if error(angle) > 1e-9:
-                        lo, hi = angle - .2, angle + .2
-                        ratio = (math.sqrt(5.0)-1.0)*.5
-                        a, b = hi-ratio*(hi-lo), lo+ratio*(hi-lo)
-                        fa, fb = error(a), error(b)
-                        for _ in range(18):
-                            if fa < fb:
-                                hi, b, fb = b, a, fa
-                                a = hi-ratio*(hi-lo)
-                                fa = error(a)
-                            else:
-                                lo, a, fa = a, b, fb
-                                b = lo+ratio*(hi-lo)
-                                fb = error(b)
-                        angle = min((angle, a, b), key=error)
-                    con.pole_angle = math.atan2(math.sin(angle), math.cos(angle))
-                    context.view_layer.update()
-                    previous_angle[target] = angle
-                    if key:
-                        _key(control, frame, previous_q)
-                        _key(pole_pb, frame, previous_q)
-                        con.keyframe_insert('pole_angle', frame=frame, group=solver[1].name)
+                steps = [
+                    _match_chain_steps(obj, job, matrices, frame, key,
+                                       previous_q, previous_pole, previous_angle)
+                    for job in jobs
+                ]
+                _evaluate_match_steps(context, steps, batch)
             if key and obj.animation_data and obj.animation_data.action:
                 owned = {PREFIX+n for _, names, _, _ in jobs for n in names} | {n for _, _, target, pole in jobs for n in (target, pole)}
                 paths = tuple(obj.pose.bones[n].path_from_id() + '.' for n in owned)

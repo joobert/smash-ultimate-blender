@@ -3212,6 +3212,20 @@ class SUB_OP_anim_rig_toggle_ik_fk(Operator):
 _last_pose_tool_bone = None
 _pose_tool_msgbus = object()
 _pose_tool_busy = False
+_pose_tool_defer_depth = 0
+
+
+@contextlib.contextmanager
+def defer_pose_tool_updates():
+    """Refresh the interactive pose tool once after a synchronous rig edit."""
+    global _pose_tool_defer_depth
+    _pose_tool_defer_depth += 1
+    try:
+        yield
+    finally:
+        _pose_tool_defer_depth -= 1
+        if _pose_tool_defer_depth == 0:
+            _schedule_pose_tool()
 
 
 def _tool_id_for_pose_bone(pose_bone):
@@ -3350,7 +3364,7 @@ def _set_view3d_tool(context, tool_id):
 
 def _apply_pose_tool(context):
     global _last_pose_tool_bone
-    if _pose_tool_busy or _file_browser_open(context):
+    if _pose_tool_defer_depth or _pose_tool_busy or _file_browser_open(context):
         return
     if getattr(context, "mode", None) != "POSE":
         _last_pose_tool_bone = None
@@ -3388,6 +3402,8 @@ def _pose_tool_apply_soon():
 
 
 def _schedule_pose_tool():
+    if _pose_tool_defer_depth:
+        return
     try:
         context = bpy.context
         if context is not None and not _pose_tool_busy and not _file_browser_open(context):
@@ -3434,6 +3450,8 @@ def _subscribe_pose_tool_msgbus():
 
 @persistent
 def _pose_tool_depsgraph(_scene, _depsgraph):
+    if _pose_tool_defer_depth:
+        return
     try:
         context = bpy.context
         if context is None or getattr(context, "mode", None) != "POSE":

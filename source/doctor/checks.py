@@ -63,6 +63,43 @@ CAMERA_SHAPE_NODE_NAME = 'gya_cameraShape'
 
 BL_CONTROL_PREFIX = 'BL_'
 
+
+@check(
+    'armature.ik_bones', 'IK bones remain',
+    scopes=(SCOPE_MODEL, SCOPE_ANIM),
+)
+def check_ik_bones(scene):
+    armature = scene.armature
+    if armature is None:
+        return
+    from ..extras.create_animation_rig import _ik_limb_kind
+    names = {
+        bone.name for bone in armature.data.bones
+        if bone.name.startswith('BL_SUB_IK_') or _ik_limb_kind(bone.name) is not None
+    }
+    for bone in armature.pose.bones:
+        for constraint in bone.constraints:
+            if constraint.type != 'IK':
+                continue
+            names.add(bone.name)
+            for target, subtarget in (
+                (constraint.target, constraint.subtarget),
+                (constraint.pole_target, constraint.pole_subtarget),
+            ):
+                if target == armature and subtarget in armature.data.bones:
+                    names.add(subtarget)
+    if names:
+        listed = ', '.join(sorted(names)[:12])
+        if len(names) > 12:
+            listed += ', ...'
+        yield DoctorResult(
+            check_id='armature.ik_bones', severity=WARNING,
+            message=f'"{armature.name}" still has IK bones.',
+            detail=f'Bake the animation and remove IK controls before export. '
+                   f'IK constraints are not stored in the exported files. Bones: {listed}',
+            target_type=TARGET_OBJECT, target_name=armature.name,
+        )
+
 _DUP_SUFFIX = re.compile(r'\.\d\d\d$')
 _POSE_BONE_PATH = re.compile(r'^pose\.bones\[["\']([^"\']+)["\']')
 
@@ -954,6 +991,9 @@ def check_export_paths(scene):
     if ssp is None:
         return results
 
+    # Remembered browser folders are informational, not export hazards.
+    # The optional raw animation folder is inferred even when it never existed,
+    # so it does not belong in missing-path diagnostics.
     # (property, kind, label, blocking)
     watched = (
         ('vanilla_nusktb', 'FILE', 'Vanilla .nusktb', True),
@@ -962,7 +1002,6 @@ def check_export_paths(scene):
         ('model_import_folder_path', 'DIR', 'Model import folder', False),
         ('last_model_folder', 'DIR', 'Last model folder', False),
         ('animation_import_folder_path', 'DIR', 'Animation import folder', False),
-        ('raw_animation_import_folder_path', 'DIR', 'Raw animation folder', False),
         ('last_anim_import_dir', 'DIR', 'Last animation import folder', False),
         ('last_anim_export_dir', 'DIR', 'Last animation export folder', False),
         ('last_swing_directory', 'DIR', 'Last swing folder', False),
@@ -978,11 +1017,11 @@ def check_export_paths(scene):
         exists = os.path.isfile(path) if kind == 'FILE' else os.path.isdir(path)
         if exists:
             continue
-        noun = 'file' if kind == 'FILE' else 'folder'
+        path_label = f'{label} file' if kind == 'FILE' else label
         results.append(DoctorResult(
             check_id='export_paths',
-            severity=ERROR if blocking else WARNING,
-            message=f'{label} {noun} does not exist.',
+            severity=ERROR if blocking else INFO,
+            message=f'{path_label} does not exist.',
             detail=path,
             target_type=TARGET_PATH,
             target_name=path,
@@ -1008,6 +1047,7 @@ def check_export_paths(scene):
 )
 def check_unbaked_bl_controls(scene):
     from ..anim.fcurve_compat import get_all_action_fcurves
+    from ..extras.create_animation_rig import _ik_limb_kind
 
     results = []
     if scene.armature is None:
@@ -1026,6 +1066,10 @@ def check_unbaked_bl_controls(scene):
                 continue
             bone_name = match.group(1)
             if bone_name not in pose_bone_names:
+                continue
+            # IK is diagnosed separately by armature.ik_bones. Solver tracks
+            # are neither animation-rig controls nor exported FK animation.
+            if bone_name.startswith('BL_SUB_IK_') or _ik_limb_kind(bone_name) is not None:
                 continue
             if bone_name.startswith(BL_CONTROL_PREFIX):
                 animated_controls.add(bone_name)

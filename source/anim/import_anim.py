@@ -173,39 +173,65 @@ def import_animation_file(
         except Exception:
             pass
 
-    if filepath.lower().endswith(RAW_ANIM_EXTENSION):
-        if obj.type != 'ARMATURE':
+    is_raw = filepath.lower().endswith(RAW_ANIM_EXTENSION)
+    if obj.type != 'ARMATURE':
+        if is_raw:
             operator.report({'ERROR'}, 'Raw animation import requires an armature.')
             return False
-        old_mode = context.mode
-        if old_mode != 'POSE':
+        import_camera_anim(operator, context, filepath, first_frame)
+        refresh_smash_viewport()
+        return True
+
+    from ..extras import create_animation_rig as rig
+    context.view_layer.update()
+    evaluated = obj.evaluated_get(context.evaluated_depsgraph_get())
+    active_limbs = [kind for kind in ('ARMS', 'LEGS')
+                    if rig.armature_has_ik(obj, kind)
+                    and rig.armature_ik_is_enabled(evaluated, kind)]
+    old_mode = obj.mode
+    old_auto_key = context.scene.tool_settings.use_keyframe_insert_auto
+    try:
+        context.scene.tool_settings.use_keyframe_insert_auto = False
+        if obj.mode != 'POSE':
             bpy.ops.object.mode_set(mode='POSE', toggle=False)
-        success = import_raw_animation(context, obj, filepath, operator)
-        if context.mode != old_mode:
-            bpy.ops.object.mode_set(mode=old_mode, toggle=False)
+        if is_raw:
+            success = import_raw_animation(context, obj, filepath, operator)
+        else:
+            import_model_anim(
+                context, filepath, include_transform, include_material,
+                include_visibility, first_frame, armature_object=obj,
+            )
+            success = True
+        if success and active_limbs and (is_raw or include_transform):
+            _refresh_imported_ik(context, obj, active_limbs, preserve_controls=is_raw)
         if success:
             refresh_smash_viewport()
         return success
-
-    if obj.type == 'ARMATURE':
-        old_mode = context.mode
-        if old_mode != 'POSE':
-            bpy.ops.object.mode_set(mode='POSE', toggle=False)
-        import_model_anim(
-            context,
-            filepath,
-            include_transform,
-            include_material,
-            include_visibility,
-            first_frame,
-            armature_object=obj,
-        )
-        if context.mode != old_mode:
+    finally:
+        context.scene.tool_settings.use_keyframe_insert_auto = old_auto_key
+        if obj.mode != old_mode:
             bpy.ops.object.mode_set(mode=old_mode, toggle=False)
-    else:
-        import_camera_anim(operator, context, filepath, first_frame)
-    refresh_smash_viewport()
-    return True
+
+
+def _refresh_imported_ik(context, obj, active_limbs, *, preserve_controls=False):
+    """Match new FK motion for enabled limbs without overwriting raw IK edits."""
+    from ..extras import create_animation_rig as rig, ik_channels, anim_layers_compat
+    from .fcurve_compat import get_fcurves_for_assigned_slot
+
+    paths = {fc.data_path for fc in get_fcurves_for_assigned_slot(obj)} if preserve_controls else set()
+    with anim_layers_compat.anim_layers_paused():
+        for kind in active_limbs:
+            controls = [obj.pose.bones[name].path_from_id() + '.'
+                        for _, _, target, pole in ik_channels.chains(obj, kind)
+                        for name in (target, pole)]
+            if paths and any(path.startswith(tuple(controls)) for path in paths):
+                # Raw clips carry their own IK controls and switch animation.
+                continue
+            ik_channels.match(context, obj, kind, entire=True, key=True)
+            rig._key_use_ik(obj, context.scene.frame_start, limbs=kind, enabled=True)
+            rig._set_ik_enabled(context, obj, True, limbs=kind)
+        context.scene.frame_set(context.scene.frame_current)
+        context.view_layer.update()
 
 
 def import_animation_paths(context, operator, filepaths):
@@ -272,11 +298,19 @@ def import_animation_paths(context, operator, filepaths):
 
 class SUB_UL_animation_import_list(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.operator_context = 'INVOKE_DEFAULT'
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            checkbox = layout.operator(
+                SUB_OP_toggle_animation_import_selection.bl_idname,
+                text="", icon='CHECKBOX_HLT' if item.selected else 'CHECKBOX_DEHLT',
+                emboss=False,
+            )
+            checkbox.index = index
+            checkbox.toggle = True
             op = layout.operator(
                 SUB_OP_toggle_animation_import_selection.bl_idname,
                 text=item.name,
-                icon='CHECKBOX_HLT' if item.selected else 'CHECKBOX_DEHLT',
+                icon='ACTION',
                 depress=item.selected,
             )
             op.index = index
@@ -297,6 +331,7 @@ class SUB_OP_toggle_animation_import_selection(Operator):
     bl_options = {'INTERNAL'}
 
     index: IntProperty(options={'HIDDEN'})
+    toggle: BoolProperty(default=False, options={'HIDDEN'})
 
     def invoke(self, context, event):
         ssp = context.scene.sub_scene_properties
@@ -304,24 +339,22 @@ class SUB_OP_toggle_animation_import_selection(Operator):
         if self.index < 0 or self.index >= len(items):
             return {'CANCELLED'}
 
-        previous_index = max(0, min(ssp.animation_import_files_index, len(items) - 1))
-        if event.shift:
-            if not event.ctrl:
-                for item in items:
-                    item.selected = False
-            first, last = sorted((previous_index, self.index))
-            for index in range(first, last + 1):
-                items[index].selected = True
-        elif event.ctrl:
-            items[self.index].selected = not items[self.index].selected
-        else:
-            for index, item in enumerate(items):
-                item.selected = index == self.index
-
+        from .selection import select_range
+        ssp.animation_import_selection_anchor = select_range(
+            items, 'selected', self.index, ssp.animation_import_selection_anchor,
+            shift=event.shift, toggle=event.ctrl or event.oskey or (self.toggle and not event.shift),
+        )
         ssp.animation_import_files_index = self.index
         return {'FINISHED'}
 
-    def execute(self, _context):
+    def execute(self, context):
+        from .selection import select_range
+        ssp = context.scene.sub_scene_properties
+        if not 0 <= self.index < len(ssp.animation_import_files):
+            return {'CANCELLED'}
+        ssp.animation_import_selection_anchor = select_range(
+            ssp.animation_import_files, 'selected', self.index, ssp.animation_import_selection_anchor, toggle=self.toggle)
+        ssp.animation_import_files_index = self.index
         return {'FINISHED'}
 
 
@@ -862,9 +895,10 @@ class SUB_PT_import_anim(Panel):
                         rows=5,
                     )
 
+                    box.label(text="Checkboxes include animations independently")
                     help_row = box.row()
                     help_row.scale_y = 0.8
-                    help_row.label(text="Click: one  Ctrl-click: toggle  Shift-click: range", icon='INFO')
+                    help_row.label(text="Name: select  Ctrl: toggle  Shift: range", icon='INFO')
 
                     row = box.row(align=True)
                     op = row.operator(SUB_OP_select_all_animation_imports.bl_idname, text="Select All")

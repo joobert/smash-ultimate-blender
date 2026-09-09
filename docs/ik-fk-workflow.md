@@ -8,6 +8,8 @@ IK Stretch Arms / IK Stretch Legs in the IK controls is off by default. Hands an
 
 Matching samples the scene frame range. A newly loaded action, newly created controls, or an unmatched limb makes the match button appear. Matching only one frame does not mark the entire animation matched. Rematch after changing the source FK animation if you want those changes copied into IK.
 
+Position IK Controls evaluates independent limbs together to reduce scene updates, including when Entire Animation is enabled. Solver iterations, pole fitting precision, and keyframe sampling are unchanged. Rigs with external or cross-limb dependencies, unsupported drivers, or animated constraint settings use sequential matching. Interactive pose-tool refreshes are deferred until matching finishes.
+
 Bake & Remove IK allows selecting legs, arms, or all present IK. It samples the evaluated motion before removing those controls and preserves unrelated limb channels.
 
 ## Existing scenes

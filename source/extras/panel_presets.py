@@ -23,7 +23,7 @@ from bpy.types import Operator, Panel, PropertyGroup, UIList
 from ..panel_order import (
     PRESETS_PANEL_ID as _PRESETS_PANEL_ID,
     apply_order,
-    cancel_pending,
+    reset as reset_panel_order,
     default_order,
     discover_panels,
 )
@@ -754,12 +754,12 @@ classes = (
 
 @persistent
 def _panel_presets_load_post(_dummy):
-    schedule_seed_presets()
+    # File data is available now. Finish Ultimate's layout before a tab manager
+    # restores category order on the next event-loop tick.
+    if bpy.app.timers.is_registered(_seed_presets_timer):
+        bpy.app.timers.unregister(_seed_presets_timer)
+    _seed_presets_timer()
     try:
-        # Re-applying the order also re-registers every Ultimate panel
-        # parent-first, which repairs any subpanels a previous session
-        # orphaned into loose top-level panels.
-        apply_active_order(getattr(bpy.context, "scene", None), defer=False)
         _install_poll_wrappers()
     except Exception:
         pass
@@ -782,10 +782,6 @@ def register():
             update=_on_preset_index_update,
         )
 
-    try:
-        apply_active_order(getattr(bpy.context, "scene", None), defer=False)
-    except Exception:
-        pass
     _install_poll_wrappers()
 
     if _panel_presets_load_post not in bpy.app.handlers.load_post:
@@ -795,11 +791,13 @@ def register():
 
 
 def unregister():
+    global _seed_scheduled
+    _seed_scheduled = False
     if _panel_presets_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_panel_presets_load_post)
     if bpy.app.timers.is_registered(_seed_presets_timer):
         bpy.app.timers.unregister(_seed_presets_timer)
-    cancel_pending()
+    reset_panel_order()
 
     _uninstall_poll_wrappers()
     if hasattr(bpy.types.Scene, "sub_panel_presets_index"):

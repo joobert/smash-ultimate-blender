@@ -3749,8 +3749,7 @@ def draw_smash_viewport_ui(layout, context):
     ssp = getattr(context.scene, "sub_scene_properties", None)
     if ssp is None:
         return
-    box = layout.box()
-    box.label(text="Smash Viewport (ssbh_wgpu)", icon="SHADING_RENDERED")
+    box = layout.column()
     box.prop(ssp, "smash_viewport", text="Smash Viewport Engine")
     path = native_plugin_path()
     if path:

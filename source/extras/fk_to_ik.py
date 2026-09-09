@@ -800,7 +800,7 @@ class SUB_OP_fk_to_ik_transfer(bpy.types.Operator):
         if context.mode != 'POSE':
             bpy.ops.object.mode_set(mode='POSE')
         try:
-            count = match(context, obj, self.cleanup_mode, self.entire_animation, self.auto_keyframe or not self.entire_animation, clean=self.clean_animation)
+            count = match(context, obj, self.cleanup_mode, self.entire_animation, self.auto_keyframe or not self.entire_animation, clean=self.clean_animation, _batch=True)
         except Exception as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}

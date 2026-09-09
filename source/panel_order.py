@@ -68,13 +68,17 @@ def _iter_ultimate_panel_classes():
                 continue
         except TypeError:
             continue
-        if getattr(cls, "bl_category", None) != "Ultimate":
+        # Simple Tabs retains this attribute when it renames a category.
+        category = getattr(cls, "original_category", None) or getattr(cls, "bl_category", None)
+        if category != "Ultimate":
             continue
         if getattr(cls, "bl_space_type", None) != "VIEW_3D":
             continue
         if getattr(cls, "bl_region_type", None) != "UI":
             continue
         panel_id = _panel_class_id(cls) or attr
+        if bpy.types.Panel.bl_rna_get_subclass_py(panel_id) is not cls:
+            continue
         # bpy.types can expose one class under more than one attribute name.
         if not panel_id or panel_id in seen:
             continue
@@ -150,16 +154,23 @@ def _reregister(root_ids):
     loose top-level panels.
     """
     sequence = _registration_sequence(root_ids)
+    unregistered = set()
     for cls in reversed(sequence):
         try:
             bpy.utils.unregister_class(cls)
-        except Exception:
-            pass
+            unregistered.add(cls)
+        except Exception as error:
+            print(f"Smash_ultimate_blender: Could not unregister panel {cls.__name__}: {error}")
+    registered = set()
     for cls in sequence:
+        if cls not in unregistered:
+            continue
         try:
             bpy.utils.register_class(cls)
-        except Exception:
-            pass
+            registered.add(cls)
+        except Exception as error:
+            print(f"Smash_ultimate_blender: Could not register panel {cls.__name__}: {error}")
+    return registered
 
 
 def tag_redraw():
@@ -170,6 +181,7 @@ def tag_redraw():
 
 
 _pending_reregister = None
+_applied_orders = {}
 
 
 def _reregister_timer():
@@ -177,8 +189,7 @@ def _reregister_timer():
     pending, _pending_reregister = _pending_reregister, None
     if pending:
         try:
-            _reregister(pending)
-            tag_redraw()
+            apply_order(pending)
         except Exception as e:
             print(f"Smash_ultimate_blender: Could not apply panel order: {e}")
     return None
@@ -213,15 +224,30 @@ def apply_order(ordered_ids, *, defer=False):
         if panel_id not in final:
             final.append(panel_id)
 
-    for index, panel_id in enumerate(final):
-        # Gaps leave room to slot in future built-in panels without ties.
-        panels[panel_id].bl_order = (index + 1) * 10
-
     if defer:
         _schedule_reregister(final)
-    else:
-        _reregister(final)
-        tag_redraw()
+        return final
+
+    # A synchronous application supersedes any earlier queued layout.
+    cancel_pending()
+    changed = []
+    for index, panel_id in enumerate(final):
+        cls = panels[panel_id]
+        # Blender sorts bl_order across the entire region, not just this tab.
+        # Start at the normal default (0), so tab managers can position Ultimate
+        # alongside other tabs. Gaps still allow ordering within Ultimate.
+        order = index * 10
+        if _applied_orders.get(cls) != order or cls.bl_order != order:
+            cls.bl_order = order
+            changed.append(panel_id)
+
+    if changed:
+        registered = _reregister(changed)
+        for panel_id in changed:
+            cls = panels[panel_id]
+            if cls in registered:
+                _applied_orders[cls] = cls.bl_order
+    tag_redraw()
     return final
 
 
@@ -233,3 +259,9 @@ def cancel_pending():
             bpy.app.timers.unregister(_reregister_timer)
         except Exception:
             pass
+
+
+def reset():
+    """Release cached class references when the add-on is disabled/reloaded."""
+    cancel_pending()
+    _applied_orders.clear()

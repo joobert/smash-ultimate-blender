@@ -135,6 +135,11 @@ class DoctorScene:
         self.actions = self._find_actions(bpy)
 
     def _find_armature(self, context):
+        # Animation export uses the active object, independently of the model
+        # export picker. In particular, camera export must not inspect that rig.
+        if self.scopes == (SCOPE_ANIM,):
+            active = context.active_object
+            return active if active is not None and active.type == 'ARMATURE' else None
         ssp = self.ssp
         arma = getattr(ssp, 'model_export_arma', None) if ssp is not None else None
         if arma is not None and arma.name in context.view_layer.objects:

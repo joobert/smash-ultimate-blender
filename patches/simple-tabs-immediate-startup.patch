@@ -1,0 +1,142 @@
+--- a/addon/timers/__init__.py
++++ b/addon/timers/__init__.py
+@@ -1,25 +1,29 @@
+ import bpy
+ from . import startup
+-from .. import utils
++
++
++def schedule_startup():
++    # File loading must replace an older pending startup, not inherit its wait.
++    if bpy.app.timers.is_registered(startup.startup_timer):
++        bpy.app.timers.unregister(startup.startup_timer)
++    startup.reset_startup()
++    bpy.app.timers.register(startup.startup_timer, first_interval=0.0)
+ 
+ 
+ @bpy.app.handlers.persistent
+ def on_load_post(dummy):
+-    if not bpy.app.timers.is_registered(startup.startup_timer):
+-        bpy.app.timers.register(startup.startup_timer, first_interval=0.0)
++    schedule_startup()
+ 
+ 
+ def register():
+-    prefs = utils.addon.prefs()
+-
+-    if not bpy.app.timers.is_registered(startup.startup_timer):
+-        bpy.app.timers.register(startup.startup_timer, first_interval=prefs.startup_delay)
++    schedule_startup()
+ 
+     if on_load_post not in bpy.app.handlers.load_post:
+         bpy.app.handlers.load_post.append(on_load_post)
+ 
+ 
+ def unregister():
++    startup.reset_startup()
+     if bpy.app.timers.is_registered(startup.startup_timer):
+         bpy.app.timers.unregister(startup.startup_timer)
+ 
+--- a/addon/timers/startup.py
++++ b/addon/timers/startup.py
+@@ -4,11 +4,24 @@
+ 
+ 
+ _retry_count = 0
+-_max_retries = 20  # 20 * 0.5s = 10 second max wait
++_max_retries = 200  # Retry only while a 3D view is unavailable, for at most 10 s.
++_initialization_settled = False
++
++
++def reset_startup():
++    global _retry_count, _initialization_settled
++    _retry_count = 0
++    _initialization_settled = False
+ 
+ 
+ def startup_timer():
+-    global _retry_count
++    global _retry_count, _initialization_settled
++
++    # Let the other add-ons' zero-delay registration callbacks finish first.
++    # This is an event-loop boundary, not a user-visible startup delay.
++    if not _initialization_settled:
++        _initialization_settled = True
++        return 0.0
+ 
+     # Wait until a 3D view exists so panel polls have valid context
+     try:
+@@ -26,7 +39,7 @@
+             _retry_count = 0
+             print('SIMPLE TABS: timed out waiting for 3D view')
+             return None
+-        return 0.5  # reschedule in 0.5 seconds
++        return 0.05
+ 
+     _retry_count = 0
+ 
+--- a/addon/utils/sidebar.py
++++ b/addon/utils/sidebar.py
+@@ -43,7 +43,10 @@
+ 
+ 
+ def is_registered(panel: bpy.types.Panel) -> bool:
+-    return hasattr(bpy.types, idname(panel))
++    # A stale subclass can inherit its parent's RNA/idname. Check the exact
++    # registered Python class, not merely whether that name exists in bpy.types.
++    return ('bl_rna' in panel.__dict__ and
++            bpy.types.Panel.bl_rna_get_subclass_py(idname(panel)) is panel)
+ 
+ 
+ def idname(panel: bpy.types.Panel) -> str:
+@@ -65,6 +68,9 @@
+ 
+ 
+ def check(panel: bpy.types.Panel) -> bool:
++    if not is_registered(panel):
++        return False
++
+     if getattr(panel, 'bl_parent_id', None):
+         parent = getattr(bpy.types, panel.bl_parent_id, None)
+ 
+@@ -81,9 +87,6 @@
+         return False
+ 
+     if is_special(panel):
+-        return False
+-
+-    if not is_registered(panel):
+         return False
+ 
+     if module(panel) != 'bl_ui':
+@@ -118,6 +121,9 @@
+ 
+ 
+ def update(panel: bpy.types.Panel):
++    if not is_registered(panel):
++        return
++
+     try:
+         bpy.utils.unregister_class(panel)
+     except:
+--- a/addon/props/prefs.py
++++ b/addon/props/prefs.py
+@@ -40,6 +40,7 @@
+     )
+ 
+ 
++    # Retained for older preference backups. Readiness now controls startup.
+     startup_delay: bpy.props.FloatProperty(
+         name='Startup Delay',
+         description='How many seconds to wait after blender startup before panels',
+@@ -78,9 +79,7 @@
+         split.label(text='Popover Width')
+         split.prop(self, 'popover_width', text='')
+ 
+-        split = column.split(factor=0.5)
+-        split.label(text='Startup Delay')
+-        split.prop(self, 'startup_delay', text='')
++        column.label(text='Tabs restore automatically when the 3D View is ready.')
+ 
+         split = column.split(factor=0.5)
+         split.label(text='Exclude Tabs')

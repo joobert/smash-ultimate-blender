@@ -370,6 +370,10 @@ class SubSceneProperties(PropertyGroup):
         description="List of found animations for imported model",
         type=AnimationImportFile
     )
+    animation_import_selection_anchor: StringProperty(options={'HIDDEN'})
+    action_export_selection_anchor: StringProperty(options={'HIDDEN'})
+    eye_look_expanded: BoolProperty(name="Eye Look", default=False)
+    smash_viewport_expanded: BoolProperty(name="Smash Viewport", default=False)
     animation_import_files_index: IntProperty(
         name="Animation Import Files Index",
         default=0

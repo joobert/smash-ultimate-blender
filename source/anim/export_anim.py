@@ -196,11 +196,19 @@ class SUB_PG_anim_action_item(bpy.types.PropertyGroup):
 # UI List for displaying available actions
 class SUB_UL_action_export_list(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.operator_context = 'INVOKE_DEFAULT'
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            checkbox = layout.operator(
+                SUB_OP_toggle_action_export_selection.bl_idname,
+                text="", icon='CHECKBOX_HLT' if item.export else 'CHECKBOX_DEHLT',
+                emboss=False,
+            )
+            checkbox.index = index
+            checkbox.toggle = True
             op = layout.operator(
                 SUB_OP_toggle_action_export_selection.bl_idname,
                 text=item.name,
-                icon='CHECKBOX_HLT' if item.export else 'CHECKBOX_DEHLT',
+                icon='ACTION',
                 depress=item.export,
             )
             op.index = index
@@ -221,6 +229,7 @@ class SUB_OP_toggle_action_export_selection(Operator):
     bl_options = {'INTERNAL'}
 
     index: IntProperty(options={'HIDDEN'})
+    toggle: BoolProperty(default=False, options={'HIDDEN'})
 
     def invoke(self, context, event):
         ssp = context.scene.sub_scene_properties
@@ -228,24 +237,22 @@ class SUB_OP_toggle_action_export_selection(Operator):
         if self.index < 0 or self.index >= len(items):
             return {'CANCELLED'}
 
-        previous_index = max(0, min(ssp.action_export_list_index, len(items) - 1))
-        if event.shift:
-            if not event.ctrl:
-                for item in items:
-                    item.export = False
-            first, last = sorted((previous_index, self.index))
-            for index in range(first, last + 1):
-                items[index].export = True
-        elif event.ctrl:
-            items[self.index].export = not items[self.index].export
-        else:
-            for index, item in enumerate(items):
-                item.export = index == self.index
-
+        from .selection import select_range
+        ssp.action_export_selection_anchor = select_range(
+            items, 'export', self.index, ssp.action_export_selection_anchor,
+            shift=event.shift, toggle=event.ctrl or event.oskey or (self.toggle and not event.shift),
+        )
         ssp.action_export_list_index = self.index
         return {'FINISHED'}
 
-    def execute(self, _context):
+    def execute(self, context):
+        from .selection import select_range
+        ssp = context.scene.sub_scene_properties
+        if not 0 <= self.index < len(ssp.action_export_list):
+            return {'CANCELLED'}
+        ssp.action_export_selection_anchor = select_range(
+            ssp.action_export_list, 'export', self.index, ssp.action_export_selection_anchor, toggle=self.toggle)
+        ssp.action_export_list_index = self.index
         return {'FINISHED'}
 
 class SUB_PT_export_anim(Panel):
@@ -299,9 +306,10 @@ class SUB_PT_export_anim(Panel):
                     row.template_list("SUB_UL_action_export_list", "", ssp, "action_export_list", 
                                      ssp, "action_export_list_index", rows=5)
 
+                    box.label(text="Checkboxes include animations independently")
                     help_row = box.row()
                     help_row.scale_y = 0.8
-                    help_row.label(text="Click: one  Ctrl-click: toggle  Shift-click: range", icon='INFO')
+                    help_row.label(text="Name: select  Ctrl: toggle  Shift: range", icon='INFO')
                     
                     # Select/deselect all actions
                     row = box.row(align=True)
