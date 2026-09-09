@@ -11,6 +11,12 @@ if TYPE_CHECKING:
 def poll_armatures(self, obj:bpy.types.Object):
     return obj.type == 'ARMATURE' and obj.name in bpy.context.view_layer.objects
 
+def poll_material_copy_source_armatures(self, obj: bpy.types.Object):
+    if obj.type != 'ARMATURE' or obj.name not in bpy.context.view_layer.objects:
+        return False
+    target = getattr(self, 'material_reimport_arma', None)
+    return obj != target
+
 def poll_other_armatures(self, obj):
     return obj.type == 'ARMATURE' and obj != get_smash_armature()
 

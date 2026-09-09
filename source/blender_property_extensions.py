@@ -344,6 +344,12 @@ class SubSceneProperties(PropertyGroup):
         description='The selected .numatb',
         default='',
     )
+    material_reimport_copy_source_arma: PointerProperty(
+        name='Source Armature',
+        description='Armature to copy materials from (meshes matched by name)',
+        type=Object,
+        poll=magic_exo_skel.poll_material_copy_source_armatures,
+    )
     last_anim_import_dir: StringProperty(
         subtype="DIR_PATH",
         default=""
