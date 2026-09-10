@@ -198,8 +198,9 @@ class PoseKeyWriter:
             fcurve = self._resolve_fcurve(action, data_path, index, channel['group'])
             if fcurve is None:
                 continue
-            merged = self._merge(fcurve, channel['frames'], channel['values'])
-            self._write(fcurve, merged, interpolation)
+            merged = self._merge(
+                fcurve, channel['frames'], channel['values'], interpolation)
+            self._write(fcurve, merged)
             written += len(channel['frames'])
 
         self._channels.clear()
@@ -207,42 +208,54 @@ class PoseKeyWriter:
         return written
 
     @staticmethod
-    def _merge(fcurve, frames, values):
+    def _merge(fcurve, frames, values, interpolation):
         """Existing keys outside the stashed frames, plus the stashed ones.
 
         Stashed frames win, which is what per-frame ``keyframe_insert`` did.
+
+        Keys that survive keep their own interpolation. The channel is
+        rewritten wholesale, so without carrying that through, keying a single
+        frame would relinearise every other segment on the curve -- something
+        ``keyframe_insert`` never did.
         """
         count = len(fcurve.keyframe_points)
+        kept = []
         if count:
-            existing = [0.0] * (count * 2)
-            fcurve.keyframe_points.foreach_get('co', existing)
+            coordinates = [0.0] * (count * 2)
+            modes = [0] * count
+            fcurve.keyframe_points.foreach_get('co', coordinates)
+            fcurve.keyframe_points.foreach_get('interpolation', modes)
             low = min(frames) - FRAME_EPSILON
             high = max(frames) + FRAME_EPSILON
             stashed = {round(frame, 4) for frame in frames}
-            kept = [(existing[i * 2], existing[i * 2 + 1]) for i in range(count)
-                    if not (low <= existing[i * 2] <= high
-                            and round(existing[i * 2], 4) in stashed)]
-        else:
-            kept = []
+            for index in range(count):
+                frame = coordinates[index * 2]
+                if low <= frame <= high and round(frame, 4) in stashed:
+                    continue
+                kept.append((frame, coordinates[index * 2 + 1], modes[index]))
 
-        merged = kept + list(zip(frames, values))
+        merged = kept + [(frame, value, interpolation)
+                         for frame, value in zip(frames, values)]
         merged.sort(key=lambda point: point[0])
         return merged
 
     @staticmethod
-    def _write(fcurve, points, interpolation):
-        flat = []
-        for frame, value in points:
-            flat.append(frame)
-            flat.append(value)
-
+    def _write(fcurve, points):
         fcurve.keyframe_points.clear()
         if not points:
             fcurve.update()
             return
+
+        flat = []
+        modes = []
+        for frame, value, interpolation in points:
+            flat.append(frame)
+            flat.append(value)
+            modes.append(interpolation)
+
         fcurve.keyframe_points.add(count=len(points))
         fcurve.keyframe_points.foreach_set('co', flat)
-        fcurve.keyframe_points.foreach_set('interpolation', [interpolation] * len(points))
+        fcurve.keyframe_points.foreach_set('interpolation', modes)
         fcurve.update()
 
 
