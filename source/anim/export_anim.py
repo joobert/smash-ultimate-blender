@@ -400,6 +400,9 @@ class AnimationExportJob:
         self._auto_key = context.scene.tool_settings.use_keyframe_insert_auto
         context.scene.tool_settings.use_keyframe_insert_auto = False
         self._job = self.export_steps(context)
+        from ..export_progress import ExportProgress
+        self._progress = ExportProgress(context)
+        self._progress.__enter__()
         AnimationExportJob._running = True
         if bpy.app.background:
             try:
@@ -465,6 +468,9 @@ class AnimationExportJob:
                 self._timer = None
             if context.workspace:
                 context.workspace.status_text_set(None)
+            if getattr(self, "_progress", None) is not None:
+                self._progress.__exit__(None, None, None)
+                self._progress = None
             AnimationExportJob._running = False
 
 
@@ -769,6 +775,10 @@ def ensure_nuanmb_filepath(filepath):
     return filename
 
 
+from ..export_progress import export_progress
+
+
+@export_progress
 def export_raw_animation_for_object(
     context: Context,
     operator: Operator,
@@ -1381,6 +1391,7 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
             transform_subtype = matches.groups()[1]
             if transform_subtype == 'location':
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
+                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1392,6 +1403,7 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
             elif transform_subtype == 'rotation_quaternion':
                 bones_with_quat.add(bone_name)
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
+                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1405,6 +1417,7 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
             elif transform_subtype == 'rotation_euler':
                 bones_with_euler.add(bone_name)
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
+                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1415,6 +1428,7 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
                         bone_name_to_euler_values[bone_name][index].z = fcurve.evaluate(frame)
             elif transform_subtype == 'scale':
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
+                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1432,6 +1446,7 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
         for bone_name, scale_values_list in bone_name_to_scale_values.items():
             yield
             for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
+                context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                 yield
                 scale = scale_values_list[index]
                 negative_axis: set[str] = set()
@@ -1666,6 +1681,7 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
                     mat_name_prop_name_to_values[material_name][property_name] = []
             # Finally can add the values at each frame
             for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
+                context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                 yield
                 if mat_track_property.sub_type == 'VECTOR':
                     mat_name_prop_name_to_values[material_name][property_name][index][fcurve.array_index] = fcurve.evaluate(frame)
@@ -1753,6 +1769,7 @@ def export_camera_anim_steps(context, operator, camera: bpy.types.Object, filepa
         override_compensate_scale=transform_override_compensate_scale
     )
     for index, frame in enumerate(range(first_blender_frame, last_blender_frame + 1)):
+        context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
         yield
         context.scene.frame_set(frame)
         track_name_to_track['FieldOfView'].values.append(camera.data.angle_y)

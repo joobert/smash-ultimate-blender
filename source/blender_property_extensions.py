@@ -221,6 +221,11 @@ class UserPoseItem(PropertyGroup):
 
 
 class SubSceneProperties(PropertyGroup):
+    auto_import_default_eyelid: BoolProperty(
+        name="Auto-import Default Eyelid",
+        description="Import a00defaulteyelid.nuanmb from the model's motion folder when available",
+        default=False,
+    )
     model_import_folder_path: StringProperty(
         name="Model Import Folder Path",
         description="Path to the folder containing the model files",

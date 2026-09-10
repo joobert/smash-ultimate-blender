@@ -50,6 +50,23 @@ def wire_end_controls(obj):
                     obj, end, con, 'sub_ik_stretch_' + kind.lower())
 
 
+def limb_path(obj, names):
+    """Actual parent path, including twist/offset bones between named joints."""
+    path = []
+    bone = obj.data.bones.get(names[-1])
+    while bone is not None:
+        path.append(bone.name)
+        if bone.name == names[0]:
+            path.reverse()
+            return tuple(path) if names[1] in path else ()
+        bone = bone.parent
+    return ()
+
+
+def solve_bone(obj, names):
+    return obj.pose.bones[PREFIX + limb_path(obj, names)[-2]]
+
+
 def create_controls(context, obj, limbs='BOTH'):
     """One idempotent creation path for IK Tools and the Animation Rig."""
     from . import create_animation_rig as rig, anim_layers_compat
@@ -64,7 +81,7 @@ def create_controls(context, obj, limbs='BOTH'):
         if limbs not in (kind, 'BOTH'):
             continue
         names = tuple(p + suffix for p in (('Leg', 'Knee', 'Foot') if kind == 'LEGS' else ('Shoulder', 'Arm', 'Hand')))
-        if all(n in obj.data.bones for n in names):
+        if all(n in obj.data.bones for n in names) and limb_path(obj, names):
             jobs.append((kind, names, ('FootIK' if kind == 'LEGS' else 'HandIK') + suffix,
                          ('KneeIK' if kind == 'LEGS' else 'ArmIK') + suffix))
     # Existing controls may have user-authored dependencies or animation. Only
@@ -141,16 +158,20 @@ def chains(obj, limbs='BOTH'):
     from .fk_to_ik import iter_leg_fk_chains, iter_arm_fk_chains
     if limbs in {'LEGS', 'BOTH'}:
         for c in iter_leg_fk_chains(obj):
-            yield 'LEGS', (c['leg'].name, c['knee'].name, c['foot'].name), c['foot_ik'].name, c['knee_ik'].name
+            names = (c['leg'].name, c['knee'].name, c['foot'].name)
+            if limb_path(obj, names):
+                yield 'LEGS', names, c['foot_ik'].name, c['knee_ik'].name
     if limbs in {'ARMS', 'BOTH'}:
         for c in iter_arm_fk_chains(obj):
             if all(c[k] is not None for k in ('shoulder', 'arm', 'hand', 'hand_ik', 'arm_ik')):
-                yield 'ARMS', (c['shoulder'].name, c['arm'].name, c['hand'].name), c['hand_ik'].name, c['arm_ik'].name
+                names = (c['shoulder'].name, c['arm'].name, c['hand'].name)
+                if limb_path(obj, names):
+                    yield 'ARMS', names, c['hand_ik'].name, c['arm_ik'].name
 
 
 def outputs(obj, limbs='BOTH'):
     for kind, names, target, pole in chains(obj, limbs):
-        for name in names:
+        for name in limb_path(obj, names):
             pb = obj.pose.bones[name]
             con = pb.constraints.get(OUTPUT)
             if con is not None:
@@ -162,7 +183,7 @@ def ensure(obj, context, limbs='BOTH'):
     jobs = list(chains(obj, limbs))
     if not jobs:
         return
-    fresh = [j for j in jobs if PREFIX + j[1][0] not in obj.data.bones]
+    fresh = [j for j in jobs if any(PREFIX + n not in obj.data.bones for n in limb_path(obj, j[1]))]
     if fresh:
         # Heal the old rest-hold workaround once, before installing independent chains.
         rig._clear_fk_rest_hold(obj)
@@ -170,9 +191,10 @@ def ensure(obj, context, limbs='BOTH'):
         bpy.ops.object.mode_set(mode='EDIT')
         bones = obj.data.edit_bones
         for kind, names, target, pole in fresh:
-            for name in names:
+            path = limb_path(obj, names)
+            for name in path:
                 src = bones[name]
-                dst = bones.new(PREFIX + name)
+                dst = bones.get(PREFIX + name) or bones.new(PREFIX + name)
                 dst.matrix = src.matrix.copy()
                 dst.length = src.length
                 dst.use_deform = False
@@ -181,7 +203,7 @@ def ensure(obj, context, limbs='BOTH'):
                 dst.use_local_location = src.use_local_location
                 dst.use_inherit_rotation = src.use_inherit_rotation
                 parent = src.parent
-                dst.parent = bones.get(PREFIX + parent.name) if parent and parent.name in names else parent
+                dst.parent = bones.get(PREFIX + parent.name) if parent and parent.name in path else parent
                 dst.use_connect = src.use_connect
             # Controls must not inherit any FK limb rotation.
             for name in (target, pole):
@@ -194,9 +216,17 @@ def ensure(obj, context, limbs='BOTH'):
         collection = obj.data.collections.get('IK Internal') or obj.data.collections.new('IK Internal')
         collection.is_visible = False
         for kind, names, target, pole in fresh:
-            for name in names:
+            path = limb_path(obj, names)
+            for name in path:
                 source = obj.pose.bones[name]
                 solver = obj.pose.bones[PREFIX + name]
+                for old in list(solver.constraints):
+                    if old.name == 'SUB IK Solve':
+                        solver.constraints.remove(old)
+                old_output = source.constraints.get(OUTPUT)
+                if old_output is not None:
+                    old_output.driver_remove('influence')
+                    source.constraints.remove(old_output)
                 solver.rotation_mode = 'QUATERNION'
                 solver.matrix_basis = source.matrix_basis.copy()
                 collection.assign(solver.bone)
@@ -214,13 +244,13 @@ def ensure(obj, context, limbs='BOTH'):
                 con.target = obj
                 con.subtarget = solver.name
                 con.target_space = con.owner_space = 'POSE'
-            mid = obj.pose.bones[PREFIX + names[1]]
+            mid = solve_bone(obj, names)
             con = mid.constraints.new('IK')
             con.name = 'SUB IK Solve'
             con.target = con.pole_target = obj
             con.subtarget = target
             con.pole_subtarget = pole
-            con.chain_count = 2
+            con.chain_count = len(path) - 1
             con.use_stretch = False
             con.iterations = 200
     obj.data[VERSION] = 2
@@ -273,13 +303,13 @@ def clean_animation(obj, limbs='BOTH', tolerance=1e-4):
         return 0
     names = set()
     for _, group, target, pole in chains(obj, limbs):
-        names.update(group)
-        names.update(PREFIX + n for n in group)
+        names.update(limb_path(obj, group))
+        names.update(PREFIX + n for n in limb_path(obj, group))
         names.update((target, pole))
     paths = {obj.pose.bones[n].path_from_id() for n in names if n in obj.pose.bones}
     allowed = {path + '.' + channel for path in paths for channel in
                ('location', 'rotation_euler', 'rotation_quaternion', 'rotation_axis_angle', 'scale')}
-    allowed.update(obj.pose.bones[PREFIX + group[1]].constraints['SUB IK Solve'].path_from_id() + '.pole_angle'
+    allowed.update(solve_bone(obj, group).constraints['SUB IK Solve'].path_from_id() + '.pole_angle'
                    for _, group, _, _ in chains(obj, limbs))
     removed = 0
     for fc in get_all_action_fcurves(action, id_type='OBJECT'):
@@ -361,7 +391,7 @@ def _can_batch_match(obj, jobs):
             # initial check. Our own pole-angle keys only affect their own limb.
             if '.constraints[' in curve.data_path:
                 if not any(
-                    curve.data_path == obj.pose.bones[PREFIX + names[1]].constraints['SUB IK Solve'].path_from_id() + '.pole_angle'
+                    curve.data_path == solve_bone(obj, names).constraints['SUB IK Solve'].path_from_id() + '.pole_angle'
                     for _, names, _, _ in jobs
                 ):
                     return False
@@ -429,18 +459,19 @@ def _match_chain_steps(obj, job, matrices, frame, key, previous_q, previous_pole
     """Yield at evaluation barriers; preserve each chain's original solve order."""
     kind, names, target, pole = job
     solver = [obj.pose.bones[PREFIX + name] for name in names]
-    con = solver[1].constraints['SUB IK Solve']
+    con = solve_bone(obj, names).constraints['SUB IK Solve']
     con.mute = True
     for endpoint in end_constraints(solver[2]):
         endpoint.mute = True
     yield
-    for pb, name in zip(solver, names):
+    seed = [obj.pose.bones[PREFIX + name] for name in limb_path(obj, names)]
+    for pb, name in zip(seed, limb_path(obj, names)):
         pb.matrix = matrices[name]
         yield
     # Independent seed channels preserve animated bone length,
     # translation and axial twist without reading FK during playback.
     if key:
-        for pb in solver:
+        for pb in seed:
             _key(pb, frame, previous_q)
     root, mid, end = [matrices[n].translation for n in names]
     axis = end - root
@@ -541,7 +572,7 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
             for frame in frames:
                 scene.frame_set(frame)
                 context.view_layer.update()
-                samples[frame] = {name: obj.pose.bones[name].matrix.copy() for _, names, _, _ in jobs for name in names}
+                samples[frame] = {name: obj.pose.bones[name].matrix.copy() for _, names, _, _ in jobs for name in limb_path(obj, names)}
             for frame, matrices in samples.items():
                 scene.frame_set(frame)
                 steps = [
@@ -551,7 +582,7 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
                 ]
                 _evaluate_match_steps(context, steps, batch)
             if key and obj.animation_data and obj.animation_data.action:
-                owned = {PREFIX+n for _, names, _, _ in jobs for n in names} | {n for _, _, target, pole in jobs for n in (target, pole)}
+                owned = {PREFIX+n for _, names, _, _ in jobs for n in limb_path(obj, names)} | {n for _, _, target, pole in jobs for n in (target, pole)}
                 paths = tuple(obj.pose.bones[n].path_from_id() + '.' for n in owned)
                 for fc in get_all_action_fcurves(obj.animation_data.action, id_type='OBJECT'):
                     if fc.data_path.startswith(paths):

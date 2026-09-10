@@ -2227,6 +2227,10 @@ class PrcHash40():
     def __repr__(self):
         return self._prc_param.__repr__()
 
+from ..export_progress import export_progress
+
+
+@export_progress
 def swing_prc_export(operator: Operator, context: Context, filepath: str):
     # forward declaration for typechecking.
     swing_bone_chain: SUB_PG_swing_bone_chain

@@ -775,6 +775,10 @@ def _apply_track_flags(track_data, track_cache):
         )
 
 
+from ...export_progress import export_progress
+
+
+@export_progress
 def export_stage_light(context, filepath: str, preview_frame=None):
     objects = {obj.get("sub_stage_light_node"): obj for obj in find_stage_light_objects(context)}
     if not objects:

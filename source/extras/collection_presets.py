@@ -1275,6 +1275,9 @@ class SUB_OP_collection_preset_import(Operator, ImportHelper):
         return {'FINISHED'} if imported else {'CANCELLED'}
 
 
+from ..export_progress import ExportProgress
+
+
 class SUB_OP_collection_preset_export(Operator, ExportHelper):
     bl_idname = "sub.collection_preset_export"
     bl_label = "Export Collection Preset"
@@ -1299,7 +1302,8 @@ class SUB_OP_collection_preset_export(Operator, ExportHelper):
         if not item or not os.path.isfile(item.path):
             self.report({'ERROR'}, "Preset file not found")
             return {'CANCELLED'}
-        shutil.copy2(item.path, self.filepath)
+        with ExportProgress(context):
+            shutil.copy2(item.path, self.filepath)
         self.report({'INFO'}, f"Exported {item.name!r}")
         return {'FINISHED'}
 

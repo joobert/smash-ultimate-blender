@@ -425,6 +425,10 @@ def weights_to_parent_bones(ssbh_mesh_data: ssbh_data_py.mesh_data.MeshData, ssb
         mesh_object.bone_influences.clear()
             
 
+from ..export_progress import export_progress
+
+
+@export_progress
 def export_model(operator: bpy.types.Operator, context, directory, include_numdlb, include_numshb, include_numshexb, include_nusktb,
                 include_numatb, include_nuhlpb, include_nutexb, linked_nusktb_settings, optimize_mesh_weights:str, armature_position: str,
                 apply_modifiers: str, split_shape_keys: str, ignore_underscore_meshes:str):
@@ -450,6 +454,7 @@ def export_model(operator: bpy.types.Operator, context, directory, include_numdl
     for selected_object in context.selected_objects:
         selected_object.select_set(False)
 
+    context.window_manager.progress_update(5)
     folder = Path(directory)
     # Create and save files individually to make this step more robust.
     # Users can avoid errors in generating a file by disabling export for that file.
@@ -495,6 +500,7 @@ def export_model(operator: bpy.types.Operator, context, directory, include_numdl
                 except Exception as e:
                     operator.report({'ERROR'}, f'Failed to make modl_data (.NUMDLB), but will try to make the rest. Error="{e}" ; Traceback=\n{traceback.format_exc()}')
             
+            context.window_manager.progress_update(35)
             if include_numatb:
                 just_export_meshes = set()
                 for unprocessed_meshes_to_export_meshes in group_name_to_unprocessed_meshes_to_export_meshes.values():
@@ -507,6 +513,7 @@ def export_model(operator: bpy.types.Operator, context, directory, include_numdl
                     trim_matl_texture_names(operator, ssbh_matl_data)
                 if ssbh_modl_data is not None and ssbh_matl_data is not None:
                     trim_material_labels(operator, ssbh_modl_data, ssbh_matl_data)
+                context.window_manager.progress_update(45)
                 if include_nutexb:
                     try:
                         materials = get_mesh_materials(operator, just_export_meshes)
@@ -528,6 +535,7 @@ def export_model(operator: bpy.types.Operator, context, directory, include_numdl
             for new_shape_key_mesh in new_shape_key_meshes:
                 bpy.data.meshes.remove(new_shape_key_mesh.data)
 
+    context.window_manager.progress_update(65)
     if include_nusktb:
         ssbh_skel_data, prc = create_skel_and_prc(operator, context, linked_nusktb_settings, folder)
 
@@ -599,6 +607,7 @@ def export_model(operator: bpy.types.Operator, context, directory, include_numdl
         from ..anim.import_anim import setup_visibility_drivers
         setup_visibility_drivers(arma)
 
+    context.window_manager.progress_update(100)
     arma.data.pose_position = old_pose_position
 
 def create_skel_and_prc(operator, context, linked_nusktb_settings, folder) -> tuple[ssbh_data_py.skel_data.SkelData | None, Any]:

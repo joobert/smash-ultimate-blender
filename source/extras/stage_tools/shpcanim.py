@@ -298,6 +298,10 @@ def import_shpcanim(context, filepath: str):
     return root, shan
 
 
+from ...export_progress import export_progress
+
+
+@export_progress
 def export_shpcanim(context, filepath: str):
     root = find_shpc_root(context)
     if root is None:

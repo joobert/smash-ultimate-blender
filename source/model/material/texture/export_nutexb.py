@@ -11,6 +11,10 @@ from ..create_matl_from_blender_materials import has_sub_matl_data, get_linked_m
 from .default_textures import generated_default_texture_name_value
 from ...export_model import would_trimmed_names_be_unique, trim_name
 
+from ....export_progress import export_progress
+
+
+@export_progress
 def export_nutexb_from_blender_materials(operator: bpy.types.Operator, materials: set[bpy.types.Material], export_dir: Path):
     images: set[bpy.types.Image] = set()
     
@@ -35,7 +39,9 @@ def export_nutexb_from_blender_materials(operator: bpy.types.Operator, materials
     with TemporaryDirectory(prefix='.sub-textures-', dir=export_dir) as staging:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             pending = []
+            completed = 0
             def finish(job):
+                nonlocal completed
                 future, name, path = job
                 try:
                     future.result()
@@ -43,6 +49,8 @@ def export_nutexb_from_blender_materials(operator: bpy.types.Operator, materials
                     operator.report({'WARNING'}, f"failed to export `{name}` as .NUTEXB, error = {e.stderr}")
                 finally:
                     path.unlink(missing_ok=True)
+                    completed += 1
+                    bpy.context.window_manager.progress_update(45 + 15 * completed / max(1, len(images)))
 
             for index, image in enumerate(sorted(images, key=lambda image: image.name)):
                 if len(pending) >= workers:

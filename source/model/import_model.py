@@ -333,6 +333,7 @@ class SUB_PT_import_model(Panel):
         row.operator(SUB_OP_select_individual_model.bl_idname, icon='ZOOM_ALL', text='Browse for individual model')
 
         row = layout.row()
+        layout.prop(ssp, "auto_import_default_eyelid")
         row.template_list("SUB_UL_model_import_list", "", ssp, "model_import_models", ssp, "model_import_models_index")
 
         row = layout.row()
@@ -805,6 +806,19 @@ def import_model(operator: bpy.types.Operator, context: bpy.types.Context):
         except Exception:
             pass
 
+    if armature is not None and ssp.auto_import_default_eyelid:
+        eyelid = find_default_eyelid(dir)
+        if eyelid is not None:
+            context.view_layer.objects.active = armature
+            armature.select_set(True)
+            try:
+                result = bpy.ops.sub.import_anim(
+                    filepath=str(eyelid), first_blender_frame=context.scene.frame_start)
+                if result != {'FINISHED'}:
+                    operator.report({'WARNING'}, f'Default eyelid import failed: {eyelid}')
+            except Exception as error:
+                operator.report({'WARNING'}, f'Default eyelid import failed: {error}')
+
     # File-backed idle poses are resolved from the active animation folder on use.
     from ..extras.idle_pose_library import initialize_predefined_poses
     initialize_predefined_poses(context)
@@ -817,6 +831,22 @@ def import_model(operator: bpy.types.Operator, context: bpy.types.Context):
             operator.report({'WARNING'}, f'Collection preset auto-apply failed: {error}')
 
     return {'FINISHED'}
+
+def find_default_eyelid(model_folder):
+    """Prefer this costume, then shared c00; never use another fighter's folder."""
+    folder = Path(model_folder)
+    for parent in (folder, *folder.parents):
+        if parent.name.lower() == 'model':
+            motion = parent.parent / 'motion'
+            relative = folder.relative_to(parent)
+            direct = motion / relative
+            for candidate in (direct, direct.parent / 'c00', motion / 'body' / 'c00', motion / 'body', motion):
+                path = candidate / 'a00defaulteyelid.nuanmb'
+                if path.is_file():
+                    return path
+            break
+    return None
+
 
 def get_shader_db_file_path():
     # This file was generated with duplicates removed to optimize space.
