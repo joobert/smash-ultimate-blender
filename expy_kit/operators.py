@@ -2452,9 +2452,9 @@ def select_bones_for_visual_bake(
     use_deform=True,
     keep_ik_bones=False,
 ):
-    """Select bones for a visual nla.bake pass.
+    """Select bones for a visual constrained bake pass.
 
-    Always bake the full skeleton (except _RET helpers). Partial selection
+    Always bake the full skeleton, including constraint helper bones. Partial selection
     leaves ancestor bones at rest on playback and causes the rig to float or
     drift vertically. keep_ik_bones is kept for API compatibility but no longer
     changes selection because the full skeleton is always baked.
@@ -2463,9 +2463,6 @@ def select_bones_for_visual_bake(
 
     bone_names: list[str] = []
     for pb in bake_armature.pose.bones:
-        if pb.name.endswith("_RET"):
-            set_pose_bone_select(pb, False)
-            continue
         set_pose_bone_select(pb, True)
         bone_names.append(pb.name)
     return bone_names
@@ -2566,6 +2563,153 @@ def strip_ret_fcurves_from_action(action):
     return removed
 
 
+def _pose_bone_chain_depth(pose_bone):
+    depth = 0
+    parent = pose_bone.parent
+    while parent is not None:
+        depth += 1
+        parent = parent.parent
+    return depth
+
+
+def _mute_all_pose_constraints(armature):
+    """Mute every pose-bone constraint; return [(constraint, was_muted), ...]."""
+    backup = []
+    for pose_bone in armature.pose.bones:
+        for constraint in pose_bone.constraints:
+            backup.append((constraint, constraint.mute))
+            constraint.mute = True
+    return backup
+
+
+def _restore_pose_constraint_mutes(backup):
+    for constraint, was_muted in backup:
+        try:
+            constraint.mute = was_muted
+        except ReferenceError:
+            pass
+
+
+def _key_pose_bone_transform(pose_bone, frame):
+    name = pose_bone.name
+    pose_bone.keyframe_insert('location', frame=frame, group=name)
+    pose_bone.keyframe_insert('scale', frame=frame, group=name)
+    if pose_bone.rotation_mode == 'QUATERNION':
+        pose_bone.keyframe_insert('rotation_quaternion', frame=frame, group=name)
+    elif pose_bone.rotation_mode == 'AXIS_ANGLE':
+        pose_bone.keyframe_insert('rotation_axis_angle', frame=frame, group=name)
+    else:
+        pose_bone.keyframe_insert('rotation_euler', frame=frame, group=name)
+
+
+def _set_action_keys_linear(action):
+    for fcurve in get_all_action_fcurves(action):
+        for keyframe in fcurve.keyframe_points:
+            keyframe.interpolation = 'LINEAR'
+
+
+def _fix_quaternion_continuity(action, bone_names):
+    """Avoid quaternion double-cover flips between consecutive baked frames."""
+    for bone_name in bone_names:
+        curves = []
+        for index in range(4):
+            path = f'pose.bones["{bone_name}"].rotation_quaternion'
+            curve = next(
+                (
+                    fcurve
+                    for fcurve in get_all_action_fcurves(action)
+                    if fcurve.data_path == path and fcurve.array_index == index
+                ),
+                None,
+            )
+            curves.append(curve)
+        if any(curve is None or not curve.keyframe_points for curve in curves):
+            continue
+        count = min(len(curve.keyframe_points) for curve in curves)
+        prev = None
+        for key_i in range(count):
+            values = [curves[axis].keyframe_points[key_i].co[1] for axis in range(4)]
+            if prev is not None and (
+                prev[0] * values[0]
+                + prev[1] * values[1]
+                + prev[2] * values[2]
+                + prev[3] * values[3]
+            ) < 0.0:
+                for axis in range(4):
+                    curves[axis].keyframe_points[key_i].co[1] = -values[axis]
+                values = [-v for v in values]
+            prev = values
+
+
+def clear_baked_pose_and_object_constraints(bake_armature, bone_names, action_armature=None):
+    """Remove constraints after the full pose AND object transform bake."""
+    if bake_armature is None:
+        return
+    for bone_name in bone_names:
+        pose_bone = bake_armature.pose.bones.get(bone_name)
+        if pose_bone is None:
+            continue
+        for constraint in reversed(pose_bone.constraints):
+            pose_bone.constraints.remove(constraint)
+
+    for constraint in reversed(list(bake_armature.constraints)):
+        bake_armature.constraints.remove(constraint)
+
+
+def _sample_constrained_visual_matrices(
+    context,
+    bake_armature,
+    bone_names,
+    frame_start,
+    frame_end,
+):
+    """Capture armature-space pose matrices with all constraints still active."""
+    pose_bones = [
+        bake_armature.pose.bones[name]
+        for name in bone_names
+        if name in bake_armature.pose.bones
+    ]
+    if not pose_bones:
+        return None, None, None
+
+    ordered = sorted(pose_bones, key=_pose_bone_chain_depth)
+    by_depth = {}
+    for pose_bone in ordered:
+        by_depth.setdefault(_pose_bone_chain_depth(pose_bone), []).append(pose_bone)
+
+    scene = context.scene
+    samples = []
+    for frame in range(frame_start, frame_end + 1):
+        scene.frame_set(frame)
+        context.view_layer.update()
+        samples.append({pose_bone.name: pose_bone.matrix.copy() for pose_bone in ordered})
+    return samples, ordered, by_depth
+
+
+def _apply_visual_matrices_and_key(
+    context,
+    bake_armature,
+    samples,
+    by_depth,
+    frame_start,
+    frame_end,
+):
+    """Mute constraints, apply sampled matrices, key real local channels."""
+    mute_backup = _mute_all_pose_constraints(bake_armature)
+    scene = context.scene
+    try:
+        for frame, visuals in zip(range(frame_start, frame_end + 1), samples):
+            scene.frame_set(frame)
+            for depth in sorted(by_depth):
+                for pose_bone in by_depth[depth]:
+                    pose_bone.matrix = visuals[pose_bone.name]
+                context.view_layer.update()
+                for pose_bone in by_depth[depth]:
+                    _key_pose_bone_transform(pose_bone, frame)
+    finally:
+        _restore_pose_constraint_mutes(mute_backup)
+
+
 def bake_one_constrained_action(
     context,
     action_armature,
@@ -2581,7 +2725,7 @@ def bake_one_constrained_action(
     """
     Bake one source action onto bake_armature.
 
-    Creates a dedicated target action before baking so bulk bakes do not
+    Creates a dedicated target action before writing keys so bulk bakes do not
     overwrite the previous result on the target armature.
     """
     if source_action is None or not constr_bone_names:
@@ -2604,57 +2748,83 @@ def bake_one_constrained_action(
         bpy.ops.object.mode_set(mode='POSE')
 
     baked_action = None
-    use_current_action = True
     same_armature = action_armature == bake_armature
 
     fr_start, fr_end = action_frame_range_safe(source_action)
+    frame_start = int(fr_start)
+    frame_end = int(fr_end)
+    if frame_end < frame_start:
+        frame_end = frame_start
+
     scene = context.scene
     prev_frame = scene.frame_current
     prev_frame_start = scene.frame_start
     prev_frame_end = scene.frame_end
-    scene.frame_start = int(fr_start)
-    scene.frame_end = int(fr_end)
+    scene.frame_start = frame_start
+    scene.frame_end = frame_end
 
     def _run_bake_pass():
-        nonlocal baked_action, use_current_action, same_armature
+        nonlocal baked_action
 
         assign_action(action_armature.animation_data, source_action)
-
-        same_armature = action_armature == bake_armature
-        if same_armature:
-            baked_action = None
-            use_current_action = False
-        else:
-            temp_action_name = uniquify_action_name(f".expykit_bake_{original_name}")
-            baked_action = bpy.data.actions.new(temp_action_name)
-            baked_action.use_fake_user = fake_user_new
-            assign_action(bake_armature.animation_data, baked_action)
-            use_current_action = True
-
-        scene.frame_set(int(fr_start))
+        # Destination channels must not mix with the constrained preview we sample.
+        if not same_armature:
+            assign_action(bake_armature.animation_data, None)
+        scene.frame_set(frame_start)
         context.view_layer.update()
+
+        # Sample first while the driving action is still assigned. Same-armature
+        # bakes would lose that action if we swapped to the empty bake action early.
+        samples, _ordered, by_depth = _sample_constrained_visual_matrices(
+            context,
+            bake_armature,
+            constr_bone_names,
+            frame_start,
+            frame_end,
+        )
+        if not samples:
+            baked_action = None
+            return
+
+        temp_action_name = uniquify_action_name(f".expykit_bake_{original_name}")
+        baked_action = bpy.data.actions.new(temp_action_name)
+        baked_action.use_fake_user = fake_user_new
+        assign_action(bake_armature.animation_data, baked_action)
+
         try:
-            bpy.ops.nla.bake(
-                frame_start=int(fr_start),
-                frame_end=int(fr_end),
-                bake_types={'POSE'},
-                only_selected=True,
-                visual_keying=True,
-                clear_constraints=False,
-                use_current_action=use_current_action,
+            _apply_visual_matrices_and_key(
+                context,
+                bake_armature,
+                samples,
+                by_depth,
+                frame_start,
+                frame_end,
             )
+        except Exception:
+            assign_action(bake_armature.animation_data, None)
+            if baked_action.users == 0:
+                bpy.data.actions.remove(baked_action)
+            baked_action = None
+            raise
         finally:
             scene.frame_set(prev_frame)
             scene.frame_start = prev_frame_start
             scene.frame_end = prev_frame_end
 
-    if lock_source_object and not same_armature:
-        with SourceObjectBakeLock(action_armature):
+    try:
+        if lock_source_object and not same_armature:
+            with SourceObjectBakeLock(action_armature):
+                _run_bake_pass()
+        else:
             _run_bake_pass()
-    else:
-        _run_bake_pass()
+    except Exception as error:
+        print(f"Bake failed for '{original_name}': {error}")
+        scene.frame_set(prev_frame)
+        scene.frame_start = prev_frame_start
+        scene.frame_end = prev_frame_end
+        return None
 
-    if not bake_armature.animation_data or not bake_armature.animation_data.action:
+    if baked_action is None or not bake_armature.animation_data or not bake_armature.animation_data.action:
         if baked_action is not None and baked_action.users == 0:
             bpy.data.actions.remove(baked_action)
         return None
@@ -2665,6 +2835,9 @@ def bake_one_constrained_action(
         if baked_action.users == 0:
             bpy.data.actions.remove(baked_action)
         return None
+
+    _set_action_keys_linear(baked_action)
+    _fix_quaternion_continuity(baked_action, constr_bone_names)
 
     if for_visible_bake or use_retarget_clean:
         clean_baked_action(
@@ -2749,7 +2922,8 @@ class BakeConstrainedActions(bpy.types.Operator):
     bl_description = "Bake Actions constrained from another Armature. No need to select two armatures"
     bl_options = {'REGISTER', 'UNDO'}
 
-    clear_users_old: BoolProperty(name="Clear original Action Users",
+    clear_users_old: BoolProperty(name="Detach Source Action After Bake",
+                                  description="Detach the active source action; preserve renamed originals and their other users",
                                   default=True)
 
     fake_user_new: BoolProperty(name="Save New Action User",
@@ -2839,7 +3013,9 @@ class BakeConstrainedActions(bpy.types.Operator):
         bake_pairs = []
         for ob in sel_obs:
             action_armature, bake_armature = resolve_bake_armature_pair(ob)
-            if action_armature and bake_armature:
+            if action_armature and bake_armature and not any(
+                pair[1] == bake_armature for pair in bake_pairs
+            ):
                 bake_pairs.append((action_armature, bake_armature, ob))
 
         actions_by_pair = []
@@ -2852,18 +3028,17 @@ class BakeConstrainedActions(bpy.types.Operator):
             )
             actions_by_pair.append((action_armature, bake_armature, actions_to_bake))
             total_actions += len(actions_to_bake)
-        
-        current_action = 0
 
         if total_actions == 0:
             self.report({'WARNING'}, "No actions found to bake")
             return {'CANCELLED'}
 
         print(f"Bake Constrained: found {total_actions} actions to bake")
-        
-        context.window.cursor_modal_set('WAIT')
-        
+
         try:
+            from ..source.retargeting.fast_bake import bake_visual_actions, load_baked_action
+
+            baked_total = 0
             for action_armature, bake_armature, actions_to_bake in actions_by_pair:
                 if not action_armature.animation_data:
                     action_armature.animation_data_create()
@@ -2886,124 +3061,82 @@ class BakeConstrainedActions(bpy.types.Operator):
                     self.report({'WARNING'}, f"No bones to bake on {bake_armature.name}")
                     continue
 
-                use_retarget_clean = action_armature != bake_armature
-                first_baked = None
+                if not actions_to_bake:
+                    continue
 
-                for action in list(actions_to_bake):
-                    current_action += 1
-                    progress = current_action / total_actions if total_actions > 0 else 0
-                    
-                    if progress < 0.25:
-                        context.window.cursor_modal_set('WAIT')
-                    elif progress < 0.5:
-                        context.window.cursor_modal_set('CROSSHAIR')
-                    elif progress < 0.75:
-                        context.window.cursor_modal_set('MOVE_X')
-                    else:
-                        context.window.cursor_modal_set('MOVE_Y')
-                    
-                    context.window_manager.progress_update(progress)
-                    bpy.context.view_layer.update()
+                pairs = bake_visual_actions(
+                    context,
+                    action_armature,
+                    bake_armature,
+                    actions_to_bake,
+                    fake_user_new=self.fake_user_new,
+                    clear_users_old=self.clear_users_old,
+                    bone_names=constr_bone_names,
+                    interp_name="LINEAR",
+                    parallel=True,
+                    log_label="Bake Constrained",
+                    use_retarget_clean=True,
+                )
+                baked_total += len(pairs)
+                first_baked = pairs[0][1] if pairs else None
 
-                    original_name = action.name
-                    baked_action = bake_one_constrained_action(
-                        context,
-                        action_armature,
-                        bake_armature,
-                        action,
-                        constr_bone_names,
-                        fake_user_new=self.fake_user_new,
-                        use_retarget_clean=use_retarget_clean,
-                    )
-                    if baked_action is None:
-                        self.report({'WARNING'}, f"failed to bake {original_name}")
-                        continue
+                if self.copy_visibility_fcurves:
+                    if hasattr(action_armature.data, 'sub_anim_properties') and hasattr(bake_armature.data, 'sub_anim_properties'):
+                        sync_vis_and_mat_tracks(action_armature.data, bake_armature.data)
 
-                    if first_baked is None:
-                        first_baked = baked_action
+                    target_armature_name = bake_armature.name
+                    source_armature_name = action_armature.name
 
-                    clean_action_name = baked_action.name
-                    print(
-                        f"Processing action '{original_name}' -> baked '{clean_action_name}' "
-                        f"(source renamed to '{original_name}_old')"
-                    )
+                    for sap_action in bpy.data.actions:
+                        if "SAP Data" not in sap_action.name:
+                            continue
+                        source_prefix_with_space = f"{source_armature_name} "
+                        if not sap_action.name.startswith(source_prefix_with_space):
+                            continue
+                        suffix = sap_action.name[len(source_prefix_with_space):]
+                        sap_action.name = f"{target_armature_name} {suffix}"
 
-                    if self.clear_users_old:
-                        old_action = bpy.data.actions.get(f"{original_name}_old")
-                        if old_action and old_action.users > 0:
-                            old_action.user_clear()
-
-                    if self.copy_visibility_fcurves:
-                        print(f"Relinking SAP Data animation to new baked action '{clean_action_name}'")
-                        if hasattr(action_armature.data, 'sub_anim_properties') and hasattr(bake_armature.data, 'sub_anim_properties'):
-                            sync_vis_and_mat_tracks(action_armature.data, bake_armature.data)
-                        
-                        target_armature_name = bake_armature.name
-                        source_armature_name = action_armature.name
-                        
+                    try:
+                        dup_pattern = re.compile(rf"^{re.escape(target_armature_name)}(?:\s+\.\d+)+\s+(?P<rest>.+)$")
+                    except Exception:
+                        dup_pattern = None
+                    if dup_pattern is not None:
                         for sap_action in bpy.data.actions:
                             if "SAP Data" not in sap_action.name:
                                 continue
-                            source_prefix_with_space = f"{source_armature_name} "
-                            if not sap_action.name.startswith(source_prefix_with_space):
+                            match = dup_pattern.match(sap_action.name)
+                            if not match:
                                 continue
+                            sap_action.name = f"{target_armature_name} {match.group('rest')}"
 
-                            suffix = sap_action.name[len(source_prefix_with_space):]
-                            new_sap_data_name = f"{target_armature_name} {suffix}"
+                    for _old_action, baked_action in pairs:
+                        sap_data_action_name = f"{target_armature_name} {baked_action.name} SAP Data"
+                        sap_data_action = bpy.data.actions.get(sap_data_action_name)
+                        if sap_data_action:
+                            if not bake_armature.data.animation_data:
+                                bake_armature.data.animation_data_create()
+                            bake_armature.data.animation_data.action = sap_data_action
 
-                            old_name = sap_action.name
-                            sap_action.name = new_sap_data_name
-                            print(f"  Renamed SAP Data action from '{old_name}' to '{new_sap_data_name}'")
-
-                        try:
-                            dup_pattern = re.compile(rf"^{re.escape(target_armature_name)}(?:\s+\.\d+)+\s+(?P<rest>.+)$")
-                        except Exception:
-                            dup_pattern = None
-                        if dup_pattern is not None:
-                            for sap_action in bpy.data.actions:
-                                if "SAP Data" not in sap_action.name:
-                                    continue
-                                match = dup_pattern.match(sap_action.name)
-                                if not match:
-                                    continue
-                                cleaned = f"{target_armature_name} {match.group('rest')}"
-                                old_name = sap_action.name
-                                sap_action.name = cleaned
-                                print(f"  Normalized SAP Data action from '{old_name}' to '{cleaned}'")
-                        
-                        if hasattr(bake_armature.data, 'animation_data'):
-                            sap_data_action_name = f"{target_armature_name} {clean_action_name} SAP Data"
-                            sap_data_action = bpy.data.actions.get(sap_data_action_name)
-                            if sap_data_action:
-                                if not bake_armature.data.animation_data:
-                                    bake_armature.data.animation_data_create()
-                                bake_armature.data.animation_data.action = sap_data_action
-                                print(f"  Linked SAP Data action '{sap_data_action_name}' to armature data for '{clean_action_name}'")
-                            else:
-                                print(f"  No SAP Data action found for '{sap_data_action_name}' (no relink performed)")
-
-                for bone_name in constr_bone_names:
-                    try:
-                        pbone = bake_armature.pose.bones[bone_name]
-                    except KeyError:
-                        continue
-                    for constr in reversed(pbone.constraints):
-                        pbone.constraints.remove(constr)
+                clear_baked_pose_and_object_constraints(
+                    bake_armature,
+                    constr_bone_names,
+                    action_armature=action_armature,
+                )
 
                 if first_baked is not None:
                     try:
-                        from ..source.retargeting.fast_bake import load_baked_action
                         load_baked_action(bake_armature, first_baked)
                     except Exception:
                         assign_action(bake_armature.animation_data, first_baked)
 
-            if current_action:
-                self.report({'INFO'}, f"Bake Constrained completed - {current_action} actions baked")
+            if baked_total:
+                self.report({'INFO'}, f"Bake Constrained completed - {baked_total} actions baked")
             else:
                 self.report({'WARNING'}, "No actions were baked")
-        finally:
-            context.window.cursor_modal_restore()
-        
+        except Exception as error:
+            self.report({'ERROR'}, f"Bake failed: {error}")
+            return {'CANCELLED'}
+
         return {'FINISHED'}
 
 
