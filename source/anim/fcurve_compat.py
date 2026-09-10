@@ -678,6 +678,36 @@ def new_fcurve(
     return channelbag.fcurves.new(data_path, index=index, group_name=action_group)
 
 
+def _ensure_accepts_group_name():
+    """Whether Action.fcurve_ensure_for_datablock takes a group_name argument.
+
+    Added alongside the method on Blender 5; on 4.x the method exists but has
+    only datablock/data_path/index, so passing group_name raises TypeError.
+    """
+    function = bpy.types.Action.bl_rna.functions.get('fcurve_ensure_for_datablock')
+    if function is None:
+        return False
+    return 'group_name' in function.parameters.keys()
+
+
+def _assign_fcurve_group(action, fcurve, name):
+    """Put an F-curve in a named channel group, on legacy or slotted actions."""
+    if not name or fcurve is None or getattr(fcurve, 'group', None) is not None:
+        return
+    holders = list(_iter_channelbags(action))
+    for holder in holders:
+        if _find_fcurve_in_channelbag(holder, fcurve) is None:
+            continue
+        groups = getattr(holder, 'groups', None)
+        if groups is None:
+            return
+        fcurve.group = groups.get(name) or groups.new(name)
+        return
+    groups = getattr(action, 'groups', None)
+    if groups is not None:
+        fcurve.group = groups.get(name) or groups.new(name)
+
+
 def ensure_fcurve_for_datablock(
     action: bpy.types.Action,
     id_data,
@@ -700,12 +730,18 @@ def ensure_fcurve_for_datablock(
         anim = getattr(id_data, "animation_data", None)
         if anim is not None and anim.action != action:
             assign_action(anim, action)
-        return ensure(
-            datablock=id_data,
-            data_path=data_path,
-            index=index,
-            group_name=action_group,
-        )
+        if _ensure_accepts_group_name():
+            return ensure(
+                datablock=id_data,
+                data_path=data_path,
+                index=index,
+                group_name=action_group,
+            )
+        # Blender 4.x exposes this method without group_name; group the curve
+        # afterwards so channels still land under their bone in the dope sheet.
+        fcurve = ensure(datablock=id_data, data_path=data_path, index=index)
+        _assign_fcurve_group(action, fcurve, action_group)
+        return fcurve
     if id_type is None:
         id_type = id_type_for_id_data(id_data) if id_data is not None else "OBJECT"
     slot_name = getattr(id_data, "name", None) if id_data is not None else None
