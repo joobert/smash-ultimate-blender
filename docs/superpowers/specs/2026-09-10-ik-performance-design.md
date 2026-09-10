@@ -274,3 +274,62 @@ is pure Python over F-curves with no depsgraph work.
 Not built, as the design said. The remaining per-phase times are below
 the several-second floor of saving the file and launching worker
 Blenders, so workers would make these operations slower.
+
+## Round two: batch import, and three Blender versions
+
+Same rig and clips, median of two runs, measured against a clean worktree
+at the pre-work commit. `batch_ik` imports five animations (275 frames
+total) through `import_animation_paths` with IK live -- what the batch
+importer runs. `create_ik` always had an animation loaded.
+
+| Phase | 4.4 before/after | 4.5 before/after | 5.2 before/after |
+| --- | --- | --- | --- |
+| Create IK, anim active (156f) | 4.79 / 2.63 (1.8x) | 4.57 / 2.46 (1.9x) | 4.68 / 2.60 (1.8x) |
+| Import anim, IK active (371f) | 44.77 / 6.06 (7.4x) | 39.77 / 5.63 (7.1x) | 42.85 / 5.99 (7.2x) |
+| Batch import 5 anims, IK on | 28.08 / 4.86 (5.8x) | 25.22 / 4.51 (5.6x) | 27.48 / 4.84 (5.7x) |
+| Bake and Remove IK | 2.47 / 0.14 (17.5x) | 2.55 / 0.17 (15.1x) | 2.42 / 0.21 (11.6x) |
+| Whole cycle | 80.11 / 13.69 (5.9x) | 72.11 / 12.78 (5.6x) | 77.43 / 13.65 (5.7x) |
+
+The full test suite passes on all three versions. Two version problems
+turned up: `bpy_restrict_state`, which Blender 5 removed, was imported by
+test_floor_contact; and the tests shared one baseline .blend, which meant
+feeding a 4.5-written file to 4.4. Each version now builds its own.
+
+### Pole refinement cut to 12 steps
+
+Last round this was measured on one clip and not taken. Six clips at
+18/12/10/8/6/4 steps now say the same thing with enough evidence to act
+on: at 12, no clip's median limb error moves measurably and every worst
+frame is identical to five decimals, for 1.18x on the match. Regressions
+appear below that -- 0.5% of the median at 10, 1.4% at 6, 3.6% at 4 --
+so 12 is convergence, not a trade.
+
+### Mirror Animation: investigated, not changed
+
+`mirror_action` spends its time in per-keyframe RNA access and in
+`keyframe_points.insert()`, which keeps the array sorted on every call
+and so is quadratic in curve length. Rewriting both sides with
+foreach_get/foreach_set gives 10x (0.87s to 0.085s) and bit-identical
+key coordinates, handle types and interpolation.
+
+It also changes the evaluated curve. These are BEZIER curves with
+AUTO_CLAMPED handles, whose stored handle positions do not match what the
+automatic formula would produce, because import writes them in bulk
+without an update. Every ordering of add / foreach_set / update tried
+here moved playback: 1.2e-2 on root translation with update() last, 8.9
+with it skipped or placed before the handles. The per-key path's result
+depends on internal dirty-curve state that bulk writes do not reproduce.
+
+Bulking only the read side is provably identical -- byte for byte,
+including evaluated output -- but only worth 1.1x, since the writes
+dominate. For 0.08s on a sub-second operation that is not worth the
+extra code, so Mirror Animation is left alone.
+
+### Also measured, also left alone
+
+`ground_character` at 0.002s and `export_model_anim_fast` at 0.37s are
+not worth attention. The add-on's own depsgraph handlers
+(`auto_detect_smash_armature`, the stage-light handler) fire on every one
+of the thousands of evaluations a match performs, but together account
+for about 1.5% of it -- not enough to justify suppressing them around
+bakes.
