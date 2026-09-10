@@ -118,6 +118,10 @@ class PoseKeyWriter:
 
     def stash_matrix_basis(self, pose_bone, frame, basis):
         """Stash a basis matrix without assigning it to the bone first."""
+        if basis is None:
+            raise ValueError(
+                f'{pose_bone.name}: no basis to stash -- the caller should have '
+                'fallen back to setting pose_bone.matrix and evaluating')
         translation, rotation, scale = basis.decompose()
         base = pose_bone.path_from_id()
         group = pose_bone.name
