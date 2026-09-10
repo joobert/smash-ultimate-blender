@@ -232,7 +232,8 @@ def _related_objects(armature, include_descendants=True, include_shapes=False):
             for pose_bone in armature.pose.bones
             if pose_bone.custom_shape is not None
         )
-    return sorted(related, key=lambda obj: obj.name.casefold())
+    return sorted((obj for obj in related if not obj.get('sub_floor_owner')),
+                  key=lambda obj: obj.name.casefold())
 
 
 def _serialize_layer_collection(layer_collection, scoped_names):
@@ -342,6 +343,10 @@ def build_preset(name, armature, context):
         if serialized:
             collection_tree.append(serialized)
     sections = {}
+    from . import ik_floor_contact
+    calibration = ik_floor_contact.serialize(armature)
+    if calibration and props.use_floor_contact:
+        sections['floor_contact'] = calibration
     if props.use_scene_collections:
         sections["scene_collections"] = collection_tree
     if props.use_object_placement:
@@ -689,6 +694,12 @@ def apply_preset(preset, armature, context):
 
     if props.use_bone_display and sections.get("bone_display"):
         _apply_bone_display(armature, sections["bone_display"], bone_match, report)
+    if props.use_floor_contact and sections.get('floor_contact'):
+        from . import ik_floor_contact
+        try:
+            ik_floor_contact.load_calibration(context, armature, sections['floor_contact'])
+        except (ValueError, TypeError, RuntimeError) as error:
+            report['warnings'].append('Floor calibration: ' + str(error))
     return report
 
 
@@ -785,6 +796,7 @@ class SUB_PG_collection_preset_settings(PropertyGroup):
     use_materials: BoolProperty(name="Materials", default=True)
     use_bone_collections: BoolProperty(name="Bone Collections", default=True)
     use_bone_display: BoolProperty(name="Bone Colors and Shapes", default=True)
+    use_floor_contact: BoolProperty(name="IK Floor Calibration", default=True)
     use_armature_display: BoolProperty(name="Armature Display", default=True)
     use_fuzzy_matching: BoolProperty(
         name="Allow Fuzzy Matching", default=False,
@@ -1358,6 +1370,7 @@ class SUB_PT_collection_presets(Panel):
         grid.prop(props, "use_materials")
         grid.prop(props, "use_bone_collections")
         grid.prop(props, "use_bone_display")
+        grid.prop(props, "use_floor_contact")
         grid.prop(props, "use_armature_display")
         box.separator()
         box.prop(props, "include_descendants")

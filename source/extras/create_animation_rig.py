@@ -109,6 +109,9 @@ def find_target_armature(context):
     """Prefer the active/selected armature, including smush_blender_import.001 copies."""
     obj = getattr(context, 'object', None)
     if obj is not None:
+        owner = obj.get('sub_floor_owner')
+        if isinstance(owner, bpy.types.Object) and owner.type == 'ARMATURE':
+            return owner
         if obj.type == 'ARMATURE':
             return obj
         if obj.type == 'MESH':

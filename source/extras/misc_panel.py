@@ -98,6 +98,9 @@ class SUB_PT_animation_tools(Panel):
                     col.separator()
 
                 # Animation Tools section
+                from . import ik_floor_contact
+                ik_floor_contact.draw(box, context, arm_ik)
+
                 col.label(text="Bake IK", icon="ACTION")
                 col.operator("sub.apply_ik_animation", text="Bake & Remove IK/FK")
                 col.separator()

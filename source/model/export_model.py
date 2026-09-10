@@ -116,6 +116,20 @@ class SUB_PT_export_model(Panel):
 
         layout.row().operator('sub.model_exporter', icon='EXPORT', text='Export Model Files to a Folder')
     
+def vanilla_reference_sibling(filepath, target):
+    """Keep the fighter, body folder and costume when switching reference types."""
+    path = Path(bpy.path.abspath(filepath))
+    parts = list(path.parts)
+    source, destination, filename = (
+        ('model', 'motion', 'update.prc') if target == 'prc'
+        else ('motion', 'model', 'model.nusktb'))
+    for index in range(len(parts) - 2, -1, -1):
+        if parts[index].lower() == source:
+            parts[index] = destination
+            return str(Path(*parts).with_name(filename))
+    return ''
+
+
 class SUB_OP_vanilla_update_prc_selector(Operator, ImportHelper):
     bl_idname = 'sub.vanilla_update_prc_selector'
     bl_label = 'Vanilla update.prc Selector'
@@ -125,8 +139,19 @@ class SUB_OP_vanilla_update_prc_selector(Operator, ImportHelper):
         default='*.prc',
         options={'HIDDEN'}
     )
+    def invoke(self, context, event):
+        ssp = context.scene.sub_scene_properties
+        self.filepath = (vanilla_reference_sibling(ssp.vanilla_nusktb, 'prc')
+                         if ssp.vanilla_nusktb else ssp.vanilla_update_prc)
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
     def execute(self, context):
-        context.scene.sub_scene_properties.vanilla_update_prc = self.filepath
+        ssp = context.scene.sub_scene_properties
+        ssp.vanilla_update_prc = self.filepath
+        sibling = vanilla_reference_sibling(self.filepath, 'skel')
+        if sibling and os.path.isfile(sibling):
+            ssp.vanilla_nusktb = sibling
         return {'FINISHED'}
 
 class SUB_OP_vanilla_nusktb_selector(Operator, ImportHelper):
@@ -142,7 +167,10 @@ class SUB_OP_vanilla_nusktb_selector(Operator, ImportHelper):
         from ..addon_preferences import get_addon_preferences
         prefs = get_addon_preferences(context)
         selected = context.scene.sub_scene_properties.vanilla_nusktb
-        if selected:
+        sibling = context.scene.sub_scene_properties.vanilla_update_prc
+        if sibling:
+            self.filepath = vanilla_reference_sibling(sibling, 'skel') or selected
+        elif selected:
             self.filepath = selected
         elif prefs and prefs.default_vanilla_nusktb_folder:
             self.filepath = os.path.join(bpy.path.abspath(prefs.default_vanilla_nusktb_folder), '')
@@ -150,7 +178,11 @@ class SUB_OP_vanilla_nusktb_selector(Operator, ImportHelper):
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
-        context.scene.sub_scene_properties.vanilla_nusktb = self.filepath
+        ssp = context.scene.sub_scene_properties
+        ssp.vanilla_nusktb = self.filepath
+        sibling = vanilla_reference_sibling(self.filepath, 'prc')
+        if sibling and os.path.isfile(sibling):
+            ssp.vanilla_update_prc = sibling
         return {'FINISHED'}      
 
 class SUB_OP_model_exporter(Operator):

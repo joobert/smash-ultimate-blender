@@ -298,15 +298,11 @@ def import_animation_paths(context, operator, filepaths):
 
 class SUB_UL_animation_import_list(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        from .selection import visible_list_indices
+        visible = ','.join(map(str, visible_list_indices(self, data.animation_import_files)))
         layout.operator_context = 'INVOKE_DEFAULT'
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            checkbox = layout.operator(
-                SUB_OP_toggle_animation_import_selection.bl_idname,
-                text="", icon='CHECKBOX_HLT' if item.selected else 'CHECKBOX_DEHLT',
-                emboss=False,
-            )
-            checkbox.index = index
-            checkbox.toggle = True
+            layout.prop(item, "selected", text="")
             op = layout.operator(
                 SUB_OP_toggle_animation_import_selection.bl_idname,
                 text=item.name,
@@ -314,6 +310,7 @@ class SUB_UL_animation_import_list(bpy.types.UIList):
                 depress=item.selected,
             )
             op.index = index
+            op.visible_indices = visible
         elif self.layout_type in {'GRID'}:
             layout.alignment = 'CENTER'
             op = layout.operator(
@@ -322,6 +319,7 @@ class SUB_UL_animation_import_list(bpy.types.UIList):
                 depress=item.selected,
             )
             op.index = index
+            op.visible_indices = visible
 
 
 class SUB_OP_toggle_animation_import_selection(Operator):
@@ -331,6 +329,7 @@ class SUB_OP_toggle_animation_import_selection(Operator):
     bl_options = {'INTERNAL'}
 
     index: IntProperty(options={'HIDDEN'})
+    visible_indices: StringProperty(options={'HIDDEN'})
     toggle: BoolProperty(default=False, options={'HIDDEN'})
 
     def invoke(self, context, event):
@@ -342,6 +341,7 @@ class SUB_OP_toggle_animation_import_selection(Operator):
         from .selection import select_range
         ssp.animation_import_selection_anchor = select_range(
             items, 'selected', self.index, ssp.animation_import_selection_anchor,
+            visible_indices=[int(i) for i in self.visible_indices.split(',') if i] or None,
             shift=event.shift, toggle=event.ctrl or event.oskey or (self.toggle and not event.shift),
         )
         ssp.animation_import_files_index = self.index
@@ -895,7 +895,7 @@ class SUB_PT_import_anim(Panel):
                         rows=5,
                     )
 
-                    box.label(text="Checkboxes include animations independently")
+                    box.label(text="Drag checkboxes to include or exclude")
                     help_row = box.row()
                     help_row.scale_y = 0.8
                     help_row.label(text="Name: select  Ctrl: toggle  Shift: range", icon='INFO')

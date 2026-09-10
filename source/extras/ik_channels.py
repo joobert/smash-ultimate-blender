@@ -225,6 +225,8 @@ def ensure(obj, context, limbs='BOTH'):
             con.iterations = 200
     obj.data[VERSION] = 2
     wire(obj)
+    from . import ik_floor_contact
+    ik_floor_contact.restore_pending(context, obj)
     context.view_layer.update()
 
 
@@ -234,6 +236,8 @@ def wire(obj):
     for pb, con, kind in outputs(obj):
         _ensure_constraint_influence_driver(obj, pb, con, _limb_switch_prop(kind))
         con.mute = False
+    from . import ik_floor_contact
+    ik_floor_contact.rewire(obj)
 
 
 def _key(pb, frame, previous):
@@ -570,12 +574,23 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
 def bake(context, obj, names, start, end, clear_constraints=True):
     """Sample first, then write local FK keys parent-first with blends disabled."""
     from . import create_animation_rig as rig, anim_layers_compat
+    from . import ik_floor_contact
     names = [n for n in names if n in obj.pose.bones and not n.startswith(PREFIX)]
+    root = obj.pose.bones.get('Trans')
+    body = root.constraints.get(ik_floor_contact.BODY_CONSTRAINT) if root else None
+    if body and any(kind == 'LEGS' and any(n in names for n in group)
+                    for kind, group, _, _ in chains(obj)):
+        if 'Trans' not in names:
+            names.append('Trans')
+    else:
+        body = None
     names.sort(key=lambda n: len(obj.pose.bones[n].parent_recursive))
     original = context.scene.frame_current
     paused = rig._IK_FK_MUTE_SYNC_PAUSED
     rig.pause_ik_fk_mute_sync(True)
     constraints = [(pb, con, con.mute) for pb, con, _ in outputs(obj) if pb.name in names]
+    if body:
+        constraints.append((root, body, body.mute))
     samples = {}
     previous = {}
     try:
@@ -597,6 +612,8 @@ def bake(context, obj, names, start, end, clear_constraints=True):
                 for pb, con, _ in constraints:
                     con.driver_remove('influence')
                     pb.constraints.remove(con)
+                if body:
+                    ik_floor_contact.remove_body(obj)
             else:
                 # Caller is baking away IK; leave the output disabled.
                 for _, con, _ in constraints:
@@ -616,6 +633,8 @@ def remove(context, obj, limbs='BOTH'):
     from . import create_animation_rig as rig
     from ..anim.fcurve_compat import get_all_action_fcurves, remove_fcurve
     jobs = list(chains(obj, limbs))
+    from . import ik_floor_contact
+    ik_floor_contact.remove(context, obj, controls={job[2] for job in jobs})
     names = {PREFIX+n for _, group, _, _ in jobs for n in group}
     names.update(n for _, _, target, pole in jobs for n in (target, pole))
     for pb, con, _ in list(outputs(obj, limbs)):
