@@ -1384,14 +1384,15 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
     bake_mode: bpy.props.EnumProperty(
         name="Bake Mode",
         items=[
-            ('CONSTRAINED', "Bake Constrained", "Original behavior - bake constrained actions"),
+            ('CONSTRAINED', "Bake Constrained", "Bake the evaluated preview for every source action"),
             ('VISIBLE', "Bake Visible", "Bake with visual keying and clear constraints"),
         ],
         default='CONSTRAINED'
     )
     
     clear_users_old: bpy.props.BoolProperty(
-        name="Clear original Action Users",
+        name="Detach Source Action After Bake",
+        description="Detach the active source action; preserve renamed originals and their other users",
         default=True
     )
     
@@ -1427,7 +1428,7 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
     # Bake Visible specific options
     clear_constraints_after: bpy.props.BoolProperty(
         name="Clear Constraints After Bake",
-        description="Remove constraints after baking",
+        description="Remove constraints after baking; otherwise retain them muted to avoid applying motion twice",
         default=True
     )
     
@@ -1491,7 +1492,7 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
         
         else:  # VISIBLE mode
             column.label(text="Bake Visible Mode:", icon='INFO')
-            column.label(text="Parallel visual bake of all actions")
+            column.label(text="Parallel Blender workers bake all actions")
             column.label(text="Renames originals to _old, baked get original names")
             
             row = column.split(factor=0.30, align=True)
@@ -1595,13 +1596,12 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
             
             # Clear constraints after all baking is done
             if self.clear_constraints_after:
-                for bone_name in bones_with_constraints:
-                    try:
-                        pbone = bake_armature.pose.bones[bone_name]
-                        for constr in reversed(pbone.constraints):
-                            pbone.constraints.remove(constr)
-                    except KeyError:
-                        continue
+                from ...expy_kit.operators import clear_baked_pose_and_object_constraints
+                clear_baked_pose_and_object_constraints(
+                    bake_armature,
+                    bones_with_constraints,
+                    action_armature=action_armature,
+                )
             
             self.report({'INFO'}, f"Bake Visible completed - {baked_count}/{total_actions} actions baked")
             self._hide_source_after_bake(context, action_armature, bake_armature)
@@ -1611,12 +1611,13 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
             return {'CANCELLED'}
         
         finally:
-            context.window.cursor_modal_restore()
+            if context.window is not None:
+                context.window.cursor_modal_restore()
         
         return {'FINISHED'}
     
     def _execute_bake_constrained(self, context):
-        """Use the original expy_kit nla.bake constrained baker."""
+        """Use the shared evaluated-preview baker through Expy Kit."""
         bake_kwargs = dict(
             clear_users_old=self.clear_users_old,
             fake_user_new=self.fake_user_new,
