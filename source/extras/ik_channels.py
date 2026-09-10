@@ -589,15 +589,26 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
     # axial twist and near-straight chains where a position-only pole test has
     # almost no useful signal.
     #
-    # This search is deliberately left alone. Its objective is not a faithful
-    # proxy for how the limb ends up looking: solving that objective exactly
-    # (the residual is close to C + A*cos(t) + B*sin(t), so three samples
-    # nearly pin it down) finds angles that score *lower* here yet drift the
-    # end effector noticeably further from the FK pose -- worst-case limb
-    # error on the benchmark rig went from 0.415 to 0.622, median from 0.039
-    # to 0.049. Whatever the bracketed search is doing, reproducing its answer
-    # matters more than the evaluations it costs. The speedups in this module
-    # come from not evaluating the *placement*, which is exact arithmetic.
+    # This search is deliberately left alone, and it is the bulk of what a
+    # match still costs -- about 25 of its evaluations per chain per frame.
+    #
+    # Its objective looks analytically solvable: changing the pole angle
+    # should rotate the solved chain rigidly about the root-to-target axis,
+    # making the residual exactly C + A*cos(t) + B*sin(t), which three samples
+    # would pin down. In practice it is not. Solving it that way finds angles
+    # that score *lower* on this measure yet drift the end effector further
+    # from the FK pose (worst-case limb error on the benchmark rig 0.415 ->
+    # 0.622, median 0.039 -> 0.049), and clamping the closed form to this same
+    # bracket does not fix it. The likely cause is that Blender's IK solver
+    # warm-starts from the previous evaluation, so the residual depends on the
+    # path taken through angles, not just the angle -- which makes a
+    # small-step local search meaningful and a three-probe fit not.
+    #
+    # Cutting the iteration count was measured too: 10 or 12 steps are
+    # indistinguishable from 18 on the benchmark clip. That is single-clip
+    # evidence about output quality for a saving of well under a second, so
+    # it was not taken. The speedups in this module come from not evaluating
+    # the *placement*, which is exact arithmetic.
     if (yield from error(angle)) > _POLE_TOLERANCE:
         lo, hi = angle - .2, angle + .2
         ratio = (math.sqrt(5.0)-1.0)*.5
@@ -684,33 +695,20 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
 
 
 def _arithmetic_bake_ok(obj, names):
-    """True when every baked bone lands exactly on its sampled world matrix.
+    """True when replaying the samples arithmetically equals the evaluated bake.
 
-    Setting ``pb.matrix`` inverts the *evaluated* parent, so replaying samples
-    with plain arithmetic is only equivalent when each baked bone ends up
-    where it was sampled. That holds when the bone is driven by its basis
-    alone -- no live constraint left to move it afterwards -- and when its
-    inheritance flags are ones pose_math models. Call after the output blends
+    Setting pb.matrix inverts the *evaluated* parent, so the two agree only
+    when each baked bone actually lands on its sampled world matrix. Bones
+    outside ``names`` are not checked: the bake does not key them, so their
+    sampled matrices stay valid as references. Call after the output blends
     have been muted.
-
-    Bones outside ``names`` are not checked: the bake does not key them, so
-    their sampled world matrices stay valid as parent references.
     """
-    for name in names:
-        pose_bone = obj.pose.bones[name]
-        if not pose_math.supports(pose_bone):
-            return False
-        if any(not con.mute for con in pose_bone.constraints):
-            return False
-    return True
+    return pose_math.can_replay([obj.pose.bones[name] for name in names])
 
 
 def _bake_reference_names(obj, names):
     """Bones to sample: the baked ones, plus unbaked parents used as references."""
-    baked = set(names)
-    extra = [pose_bone.parent.name
-             for pose_bone in (obj.pose.bones[n] for n in names)
-             if pose_bone.parent is not None and pose_bone.parent.name not in baked]
+    extra = pose_math.reference_names([obj.pose.bones[name] for name in names])
     return list(dict.fromkeys(names + extra))
 
 

@@ -92,6 +92,33 @@ def world_from_basis(pose_bone, basis: Matrix,
     return base @ basis
 
 
+def can_replay(pose_bones) -> bool:
+    """True when these bones can be re-placed at sampled matrices arithmetically.
+
+    Two conditions. Their inheritance flags must be ones this module models.
+    And nothing may still constrain them: replaying a sample assumes each bone
+    ends up exactly where it was sampled, which is what lets a child use its
+    parent's sampled matrix as a reference instead of evaluating for it. A
+    live constraint would move the bone after its basis was applied and break
+    that chain. Call after muting or removing whatever drove the sampled pose.
+    """
+    return all(supports(pose_bone)
+               and not any(not con.mute for con in pose_bone.constraints)
+               for pose_bone in pose_bones)
+
+
+def reference_names(pose_bones) -> list:
+    """Parents outside the set, whose sampled matrices anchor it.
+
+    These are not re-placed, so their sampled matrices stay valid and serve as
+    the fixed frames the outermost bones hang from. Sample them too.
+    """
+    inside = {pose_bone.name for pose_bone in pose_bones}
+    return list(dict.fromkeys(
+        pose_bone.parent.name for pose_bone in pose_bones
+        if pose_bone.parent is not None and pose_bone.parent.name not in inside))
+
+
 def apply_world(pose_bone, target_world: Matrix,
                 parent_world: Matrix | None = None) -> bool:
     """Place ``pose_bone`` arithmetically. False when the caller must evaluate.

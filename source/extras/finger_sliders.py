@@ -18,6 +18,7 @@ from ..blender_compat import (
     assign_bone_to_collection,
     ensure_bone_collection,
     isolate_bone_in_collection,
+    set_pose_bone_select,
 )
 from .create_animation_rig import (
     _FINGER_BONE,
@@ -1099,15 +1100,11 @@ def set_finger_slider_mode(armature_obj, use_sliders, context=None):
         if is_finger_control_bone(bone.name):
             bone.hide = not use_sliders
             if not use_sliders:
-                pose_bone = armature_obj.pose.bones.get(bone.name)
-                if pose_bone is not None:
-                    pose_bone.select = False
+                set_pose_bone_select(armature_obj.pose.bones.get(bone.name), False)
         elif is_finger_circle_bone(bone.name):
             bone.hide = use_sliders
             if use_sliders:
-                pose_bone = armature_obj.pose.bones.get(bone.name)
-                if pose_bone is not None:
-                    pose_bone.select = False
+                set_pose_bone_select(armature_obj.pose.bones.get(bone.name), False)
 
     _set_collection_visible(armature_obj.data, SLIDER_COLLECTION, use_sliders)
     _set_collection_visible(armature_obj.data, CIRCLE_COLLECTION, not use_sliders)
@@ -1381,8 +1378,16 @@ def _bake_finger_visual_matrices(
     progress_end,
 ):
     """Sample visual matrices with sliders live, then key unconstrained local poses."""
+    from . import pose_math
+    from ..anim.fcurve_bulk import PoseKeyWriter
+
     scene = context.scene
     ordered = sorted(fingers, key=_bone_chain_depth)
+    # Parents above the fingers keep their pose through the bake, so their
+    # sampled matrices anchor the replay without needing an evaluation.
+    sampled = ordered + [armature_obj.pose.bones[name]
+                         for name in pose_math.reference_names(ordered)
+                         if name in armature_obj.pose.bones]
     frames = []
     total = max(1, end - start + 1)
     keyed = 0
@@ -1390,12 +1395,32 @@ def _bake_finger_visual_matrices(
         for index, frame in enumerate(range(start, end + 1)):
             scene.frame_set(frame)
             context.view_layer.update()
-            frames.append({pb.name: pb.matrix.copy() for pb in ordered})
+            frames.append({pb.name: pb.matrix.copy() for pb in sampled})
             if progress is not None:
                 factor = progress_start + ((index + 0.5) / total) * (progress_end - progress_start)
                 progress.update(factor)
         _clear_finger_slider_constraints(armature_obj)
         context.view_layer.update()
+
+        if pose_math.can_replay(ordered):
+            # Every target matrix is known, so the local poses are arithmetic
+            # and the keys go out one channel at a time instead of one bone
+            # per frame. No depsgraph evaluation in this pass at all.
+            writer = PoseKeyWriter(armature_obj)
+            for index, (frame, visuals) in enumerate(zip(range(start, end + 1), frames)):
+                for pose_bone in ordered:
+                    parent = pose_bone.parent
+                    basis = pose_math.basis_from_world(
+                        pose_bone, visuals[pose_bone.name],
+                        visuals.get(parent.name) if parent is not None else None)
+                    writer.stash_matrix_basis(pose_bone, frame, basis)
+                    keyed += 1
+                if progress is not None:
+                    factor = progress_start + ((index + 1) / total) * (progress_end - progress_start)
+                    progress.update(factor)
+            writer.flush()
+            return keyed
+
         depths = {}
         for pose_bone in ordered:
             depths.setdefault(_bone_chain_depth(pose_bone), []).append(pose_bone)
