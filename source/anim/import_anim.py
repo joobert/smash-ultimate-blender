@@ -220,16 +220,27 @@ def _refresh_imported_ik(context, obj, active_limbs, *, preserve_controls=False)
 
     paths = {fc.data_path for fc in get_fcurves_for_assigned_slot(obj)} if preserve_controls else set()
     with anim_layers_compat.anim_layers_paused():
+        wanted = []
         for kind in active_limbs:
-            controls = [obj.pose.bones[name].path_from_id() + '.'
-                        for _, _, target, pole in ik_channels.chains(obj, kind)
-                        for name in (target, pole)]
-            if paths and any(path.startswith(tuple(controls)) for path in paths):
+            controls = tuple(obj.pose.bones[name].path_from_id() + '.'
+                             for _, _, target, pole in ik_channels.chains(obj, kind)
+                             for name in (target, pole))
+            if paths and controls and any(path.startswith(controls) for path in paths):
                 # Raw clips carry their own IK controls and switch animation.
                 continue
-            ik_channels.match(context, obj, kind, entire=True, key=True)
-            rig._key_use_ik(obj, context.scene.frame_start, limbs=kind, enabled=True)
-            rig._set_ik_enabled(context, obj, True, limbs=kind)
+            wanted.append(kind)
+        if wanted:
+            # One sweep covering every eligible limb. match() walks the whole
+            # clip per call, so asking per kind sampled and solved the entire
+            # animation twice on an arms-and-legs rig. _batch additionally lets
+            # the limbs it can prove independent share depsgraph evaluations --
+            # it defaults off, so this path had been taking the slowest branch.
+            ik_channels.match(context, obj,
+                              'BOTH' if len(wanted) > 1 else wanted[0],
+                              entire=True, key=True, _batch=True)
+            for kind in wanted:
+                rig._key_use_ik(obj, context.scene.frame_start, limbs=kind, enabled=True)
+                rig._set_ik_enabled(context, obj, True, limbs=kind)
         context.scene.frame_set(context.scene.frame_current)
         context.view_layer.update()
 

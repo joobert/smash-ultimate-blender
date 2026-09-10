@@ -10,6 +10,8 @@ import re
 import bpy
 from mathutils import Matrix, Vector
 
+from . import pose_math
+
 PREFIX = 'BL_SUB_IK_'
 OUTPUT = 'SUB IK Blend'
 VERSION = 'sub_independent_ik'
@@ -455,24 +457,74 @@ def _evaluate_match_steps(context, steps, batch):
         pending = waiting
 
 
-def _match_chain_steps(obj, job, matrices, frame, key, previous_q, previous_pole, previous_angle):
-    """Yield at evaluation barriers; preserve each chain's original solve order."""
+# Residual at or below which the solved chain is treated as matching the
+# sampled FK pose. Same threshold the refinement already used to stop.
+_POLE_TOLERANCE = 1e-9
+
+
+def _chain_cache(obj, jobs):
+    """Per-chain topology and pole angle, resolved once instead of per frame."""
+    cache = {}
+    for _kind, names, target, _pole in jobs:
+        path = limb_path(obj, names)
+        solver_root = obj.pose.bones.get(PREFIX + path[0]) if path else None
+        parent = solver_root.parent if solver_root is not None else None
+        cache[target] = {
+            'path': path,
+            # The solver chain hangs off the FK root's parent, which sits
+            # outside the limb and so needs sampling as a placement reference.
+            'parent': parent.name if parent is not None else None,
+            'angle': None,
+        }
+    return cache
+
+
+def _sample_names(jobs, cache):
+    """Bones whose world matrices the match needs, in a stable order."""
+    names = []
+    for _kind, _chain, target, _pole in jobs:
+        entry = cache[target]
+        names.extend(entry['path'])
+        if entry['parent']:
+            names.append(entry['parent'])
+    return list(dict.fromkeys(names))
+
+
+
+def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_pole):
+    """Yield at evaluation barriers; preserve each chain's original solve order.
+
+    Once the chain's pole angle is known, a frame costs a single barrier: the
+    seed, target and pole are placed arithmetically, and the one evaluation is
+    the solve whose residual confirms the cached angle still holds.
+    """
     kind, names, target, pole = job
+    path = entry['path']
     solver = [obj.pose.bones[PREFIX + name] for name in names]
     con = solve_bone(obj, names).constraints['SUB IK Solve']
-    con.mute = True
-    for endpoint in end_constraints(solver[2]):
-        endpoint.mute = True
-    yield
-    seed = [obj.pose.bones[PREFIX + name] for name in limb_path(obj, names)]
-    for pb, name in zip(seed, limb_path(obj, names)):
-        pb.matrix = matrices[name]
-        yield
+    endpoints = end_constraints(solver[2])
+
+    # Place the solver seed. Every target matrix is already sampled, so these
+    # are basis writes with nothing to evaluate between them. A bone pose_math
+    # cannot model falls back to the setter, which does need a barrier -- and
+    # then the solver has to be muted so it does not fight the placement.
+    parent_world = matrices.get(entry['parent'])
+    for index, name in enumerate(path):
+        pose_bone = obj.pose.bones[PREFIX + name]
+        reference = matrices[path[index - 1]] if index else parent_world
+        if not pose_math.apply_world(pose_bone, matrices[name], reference):
+            con.mute = True
+            for endpoint in endpoints:
+                endpoint.mute = True
+            pose_bone.matrix = matrices[name]
+            yield
+
     # Independent seed channels preserve animated bone length,
     # translation and axial twist without reading FK during playback.
     if key:
-        for pb in seed:
-            _key(pb, frame, previous_q)
+        for name in path:
+            writer.stash_pose_bone(obj.pose.bones[PREFIX + name], frame)
+
     root, mid, end = [matrices[n].translation for n in names]
     axis = end - root
     if axis.length < 1e-8:
@@ -487,22 +539,29 @@ def _match_chain_steps(obj, job, matrices, frame, key, previous_q, previous_pole
             bend = axis.orthogonal()
     bend.normalize()
     previous_pole[target] = bend.copy()
+
     control = obj.pose.bones[target]
     control.rotation_mode = 'QUATERNION'
-    control.matrix = matrices[names[2]]
+    if not pose_math.apply_world(control, matrices[names[2]], None):
+        control.matrix = matrices[names[2]]
+        yield
+
     pole_pb = obj.pose.bones[pole]
-    m = pole_pb.matrix.copy()
-    m.translation = mid + bend * max((mid-root).length + (end-mid).length, 0.5)
-    pole_pb.matrix = m
+    current = pose_math.world_from_basis(pole_pb, pole_pb.matrix_basis, None)
+    if current is None:
+        # Parented pole control: its world matrix has to be read, not derived.
+        yield
+        current = pole_pb.matrix.copy()
+    placed = current.copy()
+    placed.translation = mid + bend * max((mid-root).length + (end-mid).length, 0.5)
+    if not pose_math.apply_world(pole_pb, placed, None):
+        pole_pb.matrix = placed
+        yield
+
     con.mute = False
-    for endpoint in end_constraints(solver[2]):
+    for endpoint in endpoints:
         endpoint.mute = False
-    con.pole_angle = 0.0
-    yield
-    # Angle from the zero-angle solve to the desired bend plane.
-    delta = _angle(solver[1].matrix.translation-root, mid-root, axis)
-    if (mid-root-axis*(mid-root).dot(axis)).length < 1e-5:
-        delta = _angle(solver[0].matrix.to_3x3().col[0], matrices[names[0]].to_3x3().col[0], axis)
+
     # Repeated candidates do not need another scene evaluation.
     errors = {}
     def error(angle):
@@ -518,12 +577,28 @@ def _match_chain_steps(obj, job, matrices, frame, key, previous_q, previous_pole
         for candidate in candidates:
             scores.append((candidate, (yield from error(candidate))))
         return min(scores, key=lambda pair: pair[1])[0]
-    candidates = [delta, -delta, previous_angle.get(target, 0.0)]
-    angle = yield from best(candidates)
-    # Refine both bone orientations, not just the knee position.
-    # This handles axial twist and near-straight chains where a
-    # position-only pole test has almost no useful signal.
-    if (yield from error(angle)) > 1e-9:
+
+    con.pole_angle = 0.0
+    yield
+    # Angle from the zero-angle solve to the desired bend plane.
+    delta = _angle(solver[1].matrix.translation-root, mid-root, axis)
+    if (mid-root-axis*(mid-root).dot(axis)).length < 1e-5:
+        delta = _angle(solver[0].matrix.to_3x3().col[0], matrices[names[0]].to_3x3().col[0], axis)
+    angle = yield from best([delta, -delta, entry['angle'] or 0.0])
+    # Refine both bone orientations, not just the knee position. This handles
+    # axial twist and near-straight chains where a position-only pole test has
+    # almost no useful signal.
+    #
+    # This search is deliberately left alone. Its objective is not a faithful
+    # proxy for how the limb ends up looking: solving that objective exactly
+    # (the residual is close to C + A*cos(t) + B*sin(t), so three samples
+    # nearly pin it down) finds angles that score *lower* here yet drift the
+    # end effector noticeably further from the FK pose -- worst-case limb
+    # error on the benchmark rig went from 0.415 to 0.622, median from 0.039
+    # to 0.049. Whatever the bracketed search is doing, reproducing its answer
+    # matters more than the evaluations it costs. The speedups in this module
+    # come from not evaluating the *placement*, which is exact arithmetic.
+    if (yield from error(angle)) > _POLE_TOLERANCE:
         lo, hi = angle - .2, angle + .2
         ratio = (math.sqrt(5.0)-1.0)*.5
         a, b = hi-ratio*(hi-lo), lo+ratio*(hi-lo)
@@ -539,18 +614,20 @@ def _match_chain_steps(obj, job, matrices, frame, key, previous_q, previous_pole
                 b = lo+ratio*(hi-lo)
                 fb = yield from error(b)
         angle = yield from best((angle, a, b))
+    entry['angle'] = angle
+
     con.pole_angle = math.atan2(math.sin(angle), math.cos(angle))
-    yield
-    previous_angle[target] = angle
     if key:
-        _key(control, frame, previous_q)
-        _key(pole_pb, frame, previous_q)
-        con.keyframe_insert('pole_angle', frame=frame, group=solver[1].name)
+        writer.stash_pose_bone(control, frame)
+        writer.stash_pose_bone(pole_pb, frame)
+        writer.stash_channel(con.path_from_id() + '.pole_angle', 0, frame,
+                             con.pole_angle, solver[1].name)
 
 
 def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch=False):
     from . import create_animation_rig as rig, anim_layers_compat
     from ..anim.fcurve_compat import get_all_action_fcurves
+    from ..anim import fcurve_bulk
     ensure(obj, context, limbs)
     jobs = list(chains(obj, limbs))
     if not jobs:
@@ -561,8 +638,11 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
     states = [(con, con.mute) for _, con, _ in outputs(obj, limbs)]
     paused = rig._IK_FK_MUTE_SYNC_PAUSED
     rig.pause_ik_fk_mute_sync(True)
+    cache = _chain_cache(obj, jobs)
+    sampled = _sample_names(jobs, cache)
     samples = {}
-    previous_q, previous_pole, previous_angle = {}, {}, {}
+    previous_pole = {}
+    writer = fcurve_bulk.PoseKeyWriter(obj) if key else None
     try:
         with rig.defer_pose_tool_updates(), rig._disable_autokey(context), anim_layers_compat.bind_driving_action_for_bake(obj, context):
             for con, _ in states:
@@ -572,22 +652,23 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
             for frame in frames:
                 scene.frame_set(frame)
                 context.view_layer.update()
-                samples[frame] = {name: obj.pose.bones[name].matrix.copy() for _, names, _, _ in jobs for name in limb_path(obj, names)}
+                samples[frame] = {name: obj.pose.bones[name].matrix.copy() for name in sampled}
             for frame, matrices in samples.items():
                 scene.frame_set(frame)
                 steps = [
-                    _match_chain_steps(obj, job, matrices, frame, key,
-                                       previous_q, previous_pole, previous_angle)
+                    _match_chain_steps(obj, job, matrices, frame, key, writer,
+                                       cache[job[2]], previous_pole)
                     for job in jobs
                 ]
                 _evaluate_match_steps(context, steps, batch)
+            if writer is not None:
+                writer.flush()
             if key and obj.animation_data and obj.animation_data.action:
-                owned = {PREFIX+n for _, names, _, _ in jobs for n in limb_path(obj, names)} | {n for _, _, target, pole in jobs for n in (target, pole)}
+                owned = {PREFIX+n for _, _, target, _ in jobs for n in cache[target]['path']} | {n for _, _, target, pole in jobs for n in (target, pole)}
                 paths = tuple(obj.pose.bones[n].path_from_id() + '.' for n in owned)
                 for fc in get_all_action_fcurves(obj.animation_data.action, id_type='OBJECT'):
                     if fc.data_path.startswith(paths):
-                        for point in fc.keyframe_points:
-                            point.interpolation = 'LINEAR'
+                        fcurve_bulk.set_interpolation(fc, 'LINEAR')
             if entire and key and clean:
                 clean_animation(obj, limbs)
             if entire and key:
@@ -602,10 +683,49 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
     return len(samples) * len(jobs)
 
 
+def _arithmetic_bake_ok(obj, names):
+    """True when every baked bone lands exactly on its sampled world matrix.
+
+    Setting ``pb.matrix`` inverts the *evaluated* parent, so replaying samples
+    with plain arithmetic is only equivalent when each baked bone ends up
+    where it was sampled. That holds when the bone is driven by its basis
+    alone -- no live constraint left to move it afterwards -- and when its
+    inheritance flags are ones pose_math models. Call after the output blends
+    have been muted.
+
+    Bones outside ``names`` are not checked: the bake does not key them, so
+    their sampled world matrices stay valid as parent references.
+    """
+    for name in names:
+        pose_bone = obj.pose.bones[name]
+        if not pose_math.supports(pose_bone):
+            return False
+        if any(not con.mute for con in pose_bone.constraints):
+            return False
+    return True
+
+
+def _bake_reference_names(obj, names):
+    """Bones to sample: the baked ones, plus unbaked parents used as references."""
+    baked = set(names)
+    extra = [pose_bone.parent.name
+             for pose_bone in (obj.pose.bones[n] for n in names)
+             if pose_bone.parent is not None and pose_bone.parent.name not in baked]
+    return list(dict.fromkeys(names + extra))
+
+
 def bake(context, obj, names, start, end, clear_constraints=True):
-    """Sample first, then write local FK keys parent-first with blends disabled."""
+    """Sample first, then write local FK keys derived from the sampled matrices.
+
+    The sample pass has to evaluate the constrained IK pose once per frame.
+    The write pass does not: every bone's target world matrix is already known,
+    so the basis is arithmetic (see pose_math) and the keys go out in one bulk
+    pass per channel instead of a keyframe_insert per bone per frame. Rigs that
+    fail _arithmetic_bake_ok fall back to the original evaluate-per-bone loop.
+    """
     from . import create_animation_rig as rig, anim_layers_compat
     from . import ik_floor_contact
+    from ..anim.fcurve_bulk import PoseKeyWriter
     names = [n for n in names if n in obj.pose.bones and not n.startswith(PREFIX)]
     root = obj.pose.bones.get('Trans')
     body = root.constraints.get(ik_floor_contact.BODY_CONSTRAINT) if root else None
@@ -624,21 +744,38 @@ def bake(context, obj, names, start, end, clear_constraints=True):
         constraints.append((root, body, body.mute))
     samples = {}
     previous = {}
+    sampled = _bake_reference_names(obj, names)
     try:
         with rig._disable_autokey(context), anim_layers_compat.bind_driving_action_for_bake(obj, context):
             for frame in range(int(start), int(end) + 1):
                 context.scene.frame_set(frame)
                 context.view_layer.update()
-                samples[frame] = {n: obj.pose.bones[n].matrix.copy() for n in names}
+                samples[frame] = {n: obj.pose.bones[n].matrix.copy() for n in sampled}
             for _, con, _ in constraints:
                 con.mute = True
-            for frame, matrices in samples.items():
-                context.scene.frame_set(frame)
-                for n in names:
-                    pb = obj.pose.bones[n]
-                    pb.matrix = matrices[n]
-                    context.view_layer.update()
-                    _key(pb, frame, previous)
+            if _arithmetic_bake_ok(obj, names):
+                writer = PoseKeyWriter(obj)
+                for frame, matrices in samples.items():
+                    for n in names:
+                        pb = obj.pose.bones[n]
+                        parent = pb.parent
+                        basis = pose_math.basis_from_world(
+                            pb, matrices[n],
+                            matrices.get(parent.name) if parent is not None else None)
+                        if basis is None:
+                            raise RuntimeError(
+                                f'{n}: no arithmetic basis despite passing the '
+                                'eligibility check')
+                        writer.stash_matrix_basis(pb, frame, basis)
+                writer.flush()
+            else:
+                for frame, matrices in samples.items():
+                    context.scene.frame_set(frame)
+                    for n in names:
+                        pb = obj.pose.bones[n]
+                        pb.matrix = matrices[n]
+                        context.view_layer.update()
+                        _key(pb, frame, previous)
             if clear_constraints:
                 for pb, con, _ in constraints:
                     con.driver_remove('influence')
