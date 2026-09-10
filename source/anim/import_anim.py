@@ -381,6 +381,7 @@ class SUB_UL_raw_animation_import_list(bpy.types.UIList):
             layout.label(text=item.name)
 
 class SUB_OP_import_all_animations(bpy.types.Operator):
+    bl_description = 'Import every animation from the selected animation folder as Blender actions'
     bl_idname = 'sub.import_all_animations'
     bl_label = 'Import All Animations'
     bl_options = {'REGISTER', 'UNDO'}
@@ -731,6 +732,7 @@ class SUB_OP_import_raw_anim_file(Operator, ImportHelper):
 
 
 class SUB_OP_refresh_raw_animation_list(Operator):
+    bl_description = 'Scan the raw animation folder again and refresh its file list'
     bl_idname = 'sub.refresh_raw_animation_list'
     bl_label = 'Refresh Raw Animation List'
     bl_options = {'UNDO'}
@@ -752,6 +754,7 @@ class SUB_OP_refresh_raw_animation_list(Operator):
 
 
 class SUB_OP_import_selected_raw_anim(Operator):
+    bl_description = 'Import checked raw animations from the file list onto the selected armature'
     bl_idname = 'sub.import_selected_raw_anim'
     bl_label = 'Import Selected Raw Animation'
     bl_options = {'UNDO'}
@@ -784,6 +787,7 @@ class SUB_OP_import_selected_raw_anim(Operator):
 
 
 class SUB_OP_import_all_raw_anims(Operator):
+    bl_description = 'Import all raw animations from the chosen folder onto the selected armature'
     bl_idname = 'sub.import_all_raw_anims'
     bl_label = 'Import All Raw Animations'
     bl_options = {'UNDO'}
@@ -832,6 +836,7 @@ class SUB_PT_import_anim(Panel):
         return False
     
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
         obj: bpy.types.Object = context.active_object
@@ -907,7 +912,7 @@ class SUB_PT_import_anim(Panel):
                     op.select = False
                     
                     row = box.row()
-                    row.scale_y = 1.2
+                    row.scale_y = 1.0
                     selected_count = sum(1 for item in ssp.animation_import_files if item.selected)
                     row.operator(
                         SUB_OP_import_selected_anim.bl_idname,
@@ -918,6 +923,10 @@ class SUB_PT_import_anim(Panel):
                     # Add batch import button
                     row = box.row()
                     row.operator(SUB_OP_import_all_animations.bl_idname, text="Import All Animations")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_PT_raw_animations(Panel):
@@ -932,6 +941,7 @@ class SUB_PT_raw_animations(Panel):
         return context.mode in {"POSE", "OBJECT"}
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
         ssp = context.scene.sub_scene_properties
@@ -1007,8 +1017,12 @@ class SUB_PT_raw_animations(Panel):
         export_box.label(text="Export", icon='EXPORT')
         export_box.prop(ssp, "anim_include_raw_animation", text="Include Raw with .NUANMB Export")
         row = export_box.row()
-        row.scale_y = 1.2
+        row.scale_y = 1.0
         row.operator('sub.raw_anim_export', icon='EXPORT', text='Export Raw Animation')
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_OP_import_anim(Operator):
@@ -2020,6 +2034,7 @@ class SUB_MT_animation_folders(Menu):
 
 
 class SUB_OP_switch_animation_folder(Operator):
+    bl_description = 'Switch the animation browser to this folder and refresh its file list'
     bl_idname = 'sub.switch_animation_folder'
     bl_label = 'Switch Animation Folder'
     bl_options = {'UNDO'}

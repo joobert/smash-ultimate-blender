@@ -742,6 +742,7 @@ def rotate_hip_180(armature, axis, only_active_frame=False, current_frame=None):
 
 class SUB_OT_mirror_action(Operator):
     """Mirror/flip animation on selected axis"""
+    bl_description = 'Mirror/flip animation on selected axis'
     bl_idname = "sub.mirror_action"
     bl_label = "Mirror Action"
     bl_options = {"REGISTER","UNDO"}
@@ -899,6 +900,7 @@ class SUB_OT_mirror_action(Operator):
 
 class SUB_OT_mirror_all_actions(Operator):
     """Mirror every loaded animation on the active armature"""
+    bl_description = 'Mirror every loaded animation on the active armature'
     bl_idname = "sub.mirror_all_actions"
     bl_label = "Mirror All Loaded Animations"
     bl_options = {"REGISTER", "UNDO"}
@@ -1072,6 +1074,7 @@ class SUB_UL_mirror_custom_bones(bpy.types.UIList):
 
 class SUB_OT_find_custom_mirror_bones(Operator):
     """List bones that are not part of a normal Smash Ultimate armature"""
+    bl_description = 'List bones that are not part of a normal Smash Ultimate armature'
     bl_idname = "sub.find_custom_mirror_bones"
     bl_label = "Find Custom Bones"
     bl_options = {'REGISTER'}
@@ -1101,6 +1104,7 @@ class SUB_OT_find_custom_mirror_bones(Operator):
 
 class SUB_OT_mirror_custom_bones_set_all(Operator):
     """Check or uncheck every custom bone in the list"""
+    bl_description = 'Check or uncheck every custom bone in the list'
     bl_idname = "sub.mirror_custom_bones_set_all"
     bl_label = "Set All Custom Bones"
     bl_options = {'REGISTER'}

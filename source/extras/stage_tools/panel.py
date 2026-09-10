@@ -21,6 +21,7 @@ class SUB_PT_stage_tools(Panel):
         return getattr(context.scene, "sub_scene_properties", None) is not None
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
         ssp = getattr(context.scene, "sub_scene_properties", None)
@@ -123,3 +124,7 @@ class SUB_PT_stage_tools(Panel):
             box.label(text="Enter the scale your fighter is set to in code.")
             box.label(text="The stage is scaled by the inverse of it.")
             box.label(text="Reference geometry only, do not export it.")
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)

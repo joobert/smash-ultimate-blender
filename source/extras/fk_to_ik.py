@@ -164,6 +164,7 @@ def run_fk_to_ik_match_for_raw_import(context, cleanup_mode='LEGS'):
 
 class SUB_OP_fk_to_ik_transfer(bpy.types.Operator):
     """Perfectly positions IK controls to match the FK bone positions"""
+    bl_description = 'Perfectly positions IK controls to match the FK bone positions'
     bl_idname = "sub.fk_to_ik_transfer"
     bl_label = "Position IK Controls"
     bl_options = {'REGISTER', 'UNDO'}

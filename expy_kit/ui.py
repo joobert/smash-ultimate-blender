@@ -123,6 +123,7 @@ def action_header_buttons(self, context):
 
 class ActionRemoveRenameData(bpy.types.Operator):
     """Remove action rename data"""
+    bl_description = 'Remove action rename data'
     bl_idname = "object.expykit_remove_action_rename_data"
     bl_label = "Expy remove rename data"
 
@@ -141,6 +142,7 @@ class ActionRemoveRenameData(bpy.types.Operator):
 
 class ActionMakeActive(bpy.types.Operator):
     """Apply next action and adjust timeline"""
+    bl_description = 'Apply next action and adjust timeline'
     bl_idname = "object.expykit_make_action_active"
     bl_label = "Expy apply action"
 
@@ -173,6 +175,7 @@ class ActionMakeActive(bpy.types.Operator):
 
 class ActionRenameSimple(bpy.types.Operator):
     """Rename Current Action"""
+    bl_description = 'Rename Current Action'
     bl_idname = "object.expykit_rename_action_simple"
     bl_label = "Expy Action Rename"
     bl_options = {'REGISTER', 'UNDO'}
@@ -279,6 +282,7 @@ class VIEW3D_PT_expy_rename_advanced(bpy.types.Panel):
 
 class ExecutePresetArmatureRetarget(Operator):
     """Apply a Bone Retarget Preset"""
+    bl_description = 'Apply a Bone Retarget Preset'
     bl_idname = "object.expy_kit_armature_preset_apply"
     bl_label = "Apply Bone Retarget Preset"
 
@@ -339,6 +343,7 @@ class ExecutePresetArmatureRetarget(Operator):
 
 class AddPresetArmatureRetarget(AddPresetBase, Operator):
     """Add a Bone Retarget Preset"""
+    bl_description = 'Add a Bone Retarget Preset'
     bl_idname = "object.expy_kit_armature_preset_add"
     bl_label = "Add Bone Retarget Preset"
     preset_menu = "VIEW3D_MT_retarget_presets"
@@ -380,6 +385,7 @@ class AddPresetArmatureRetarget(AddPresetBase, Operator):
 
 
 class ClearArmatureRetarget(Operator):
+    bl_description = 'Clear the active armature bone mappings used for retargeting'
     bl_idname = "object.expy_kit_armature_clear"
     bl_label = "Clear Retarget Settings"
 
@@ -431,6 +437,7 @@ class ClearArmatureRetarget(Operator):
 
 class SetToActiveBone(Operator):
     """Set adjacent UI entry to active bone"""
+    bl_description = 'Set adjacent UI entry to active bone'
     bl_idname = "object.expy_kit_set_to_active_bone"
     bl_label = "Set to Active Bone"
 
@@ -480,6 +487,7 @@ class SetToActiveBone(Operator):
 
 class SetToActiveBoneHelpText(bpy.types.Operator):
     """Show information about the Set to Active Bone functionality"""
+    bl_description = 'Show information about the Set to Active Bone functionality'
     bl_idname = "object.expy_kit_active_bone_help"
     bl_label = "Set to Active Bone Help"
     
@@ -506,6 +514,7 @@ class SetToActiveBoneHelpText(bpy.types.Operator):
 
 class MirrorSettings(Operator):
     """Mirror Settings to the other side"""
+    bl_description = 'Mirror Settings to the other side'
     bl_idname = "object.expy_kit_settings_mirror"
     bl_label = "Mirror Skeleton Mapping"
     bl_options = {'REGISTER', 'UNDO'}
@@ -610,6 +619,7 @@ class VIEW3D_MT_retarget_presets(Menu):
 
 class BindFromPanelSelection(bpy.types.Operator):
     """Constrain to armature selected in panel"""
+    bl_description = 'Constrain to armature selected in panel'
     bl_idname = "object.expy_kit_bind_from_panel"
     bl_label = "Bind Armatures"
     bl_options = {'REGISTER', 'UNDO'}
@@ -969,6 +979,7 @@ def poll_armature_bind_to(self, object):
 
 class AddCustomBone(bpy.types.Operator):
     """Add a bone to the custom bone list"""
+    bl_description = 'Add a bone to the custom bone list'
     bl_idname = "object.expy_kit_add_custom_bone"
     bl_label = "Add Custom Bone"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1007,6 +1018,7 @@ class AddCustomBone(bpy.types.Operator):
 
 class RemoveCustomBone(bpy.types.Operator):
     """Remove a custom bone"""
+    bl_description = 'Remove a custom bone'
     bl_idname = "object.expy_kit_remove_custom_bone"
     bl_label = "Remove Custom Bone"
     bl_options = {'REGISTER', 'UNDO'}

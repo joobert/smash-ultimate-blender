@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 class SUB_OT_reset_bone_locations(Operator):
     """Reset bone locations and scales to 0/1 at frame 1 and delete their keyframes for selected bones, except for hip/trans/rot bones"""
+    bl_description = 'Reset bone locations and scales to 0/1 at frame 1 and delete their keyframes for selected bones, except for hip/trans/rot bones'
     bl_idname = "sub.reset_bone_locations"
     bl_label = "Reset Bone Locations"
     bl_options = {'REGISTER', 'UNDO'}
@@ -267,6 +268,7 @@ class SUB_OT_reset_bone_locations(Operator):
 
 class SUB_OT_invert_rotation_values(Operator):
     """Invert rotation values of selected bones from negative to positive and vice versa"""
+    bl_description = 'Invert rotation values of selected bones from negative to positive and vice versa'
     bl_idname = "sub.invert_rotation_values"
     bl_label = "Invert Positive and Negative"
     bl_options = {'REGISTER', 'UNDO'}
@@ -314,6 +316,7 @@ class SUB_OT_invert_rotation_values(Operator):
 
 class SUB_OT_remove_swing_bone_animation(Operator):
     """Remove animation data from swing bones (S_*) and reset them to rest values"""
+    bl_description = 'Remove animation data from swing bones (S_*) and reset them to rest values'
     bl_idname = "sub.remove_swing_bone_animation"
     bl_label = "Remove Animation from Swing Bones"
     bl_options = {'REGISTER', 'UNDO'}
@@ -376,6 +379,7 @@ class SUB_OT_remove_swing_bone_animation(Operator):
 
 class SUB_OT_ground_character(Operator):
     """Move the hip bone on the Y axis until either FootL or FootR bone head touches the ground"""
+    bl_description = 'Move the hip bone on the Y axis until either FootL or FootR bone head touches the ground'
     bl_idname = "sub.ground_character"
     bl_label = "Ground Character"
     bl_options = {'REGISTER', 'UNDO'}

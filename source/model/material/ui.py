@@ -26,6 +26,10 @@ class MaterialPanel(Panel):
         if sub_matl_data.shader_label == "":
             return False 
         return True
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
     
 class SUB_PT_matl_data_master(MaterialPanel):
     bl_label = "Ultimate Material Data"
@@ -54,11 +58,11 @@ class SUB_PT_matl_data_master(MaterialPanel):
             row = layout.row()
             row.operator_context = 'INVOKE_DEFAULT'
             row.operator(operators.SUB_OP_convert_blender_material.bl_idname)
-            row.scale_y = 2
+            row.scale_y = 1.0
             row.scale_x = 2
             row = layout.row()
             row.operator(operators.SUB_OP_convert_blender_material_no_textures.bl_idname)
-            row.scale_y = 1.5
+            row.scale_y = 1.0
             row.scale_x = 2
             return
         box = layout.box()
@@ -76,12 +80,16 @@ class SUB_PT_matl_data_master(MaterialPanel):
             # Show Revert button when converted
             row = layout.row()
             row.operator(operators.SUB_OP_revert_smash_material.bl_idname, text="Revert to Smash Material", icon='LOOP_BACK')
-            row.scale_y = 1.5
+            row.scale_y = 1.0
         else:
             # Add Convert Smash Material button
             row = layout.row()
             row.operator(operators.SUB_OP_convert_smash_material.bl_idname, text="Convert to Principled BSDF", icon='MATERIAL')
-            row.scale_y = 1.5
+            row.scale_y = 1.0
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_PT_matl_data_bools(MaterialPanel):
     bl_label = "Bools"
@@ -100,6 +108,10 @@ class SUB_PT_matl_data_bools(MaterialPanel):
             row.alignment = 'RIGHT'
             row.prop(matl_bool, "value", text="")
 
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 
 class SUB_PT_matl_data_floats(MaterialPanel):
     bl_label = "Floats"
@@ -117,6 +129,10 @@ class SUB_PT_matl_data_floats(MaterialPanel):
             row = row.row()
             row.alignment = 'RIGHT'
             row.prop(matl_float, "value", text="")
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
             
 class SUB_PT_matl_data_vectors(MaterialPanel):
     bl_label = "Vectors"
@@ -138,6 +154,10 @@ class SUB_PT_matl_data_vectors(MaterialPanel):
             sub_row.prop(vector, "value", text="", index=1)
             sub_row.prop(vector, "value", text="", index=2)
             sub_row.prop(vector, "value", text="", index=3)
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_PT_matl_data_textures(MaterialPanel):
     bl_label = "Textures"
@@ -163,6 +183,10 @@ class SUB_PT_matl_data_textures(MaterialPanel):
             if texture.image is not None:
                 width, height = texture.image.size
                 box.label(text=f"{width} x {height}" if width and height else "Image data unavailable")
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_PT_matl_data_samplers(MaterialPanel):
     bl_label = "Samplers"
@@ -201,6 +225,10 @@ class SUB_PT_matl_data_samplers(MaterialPanel):
             cf.separator()
             cf.prop(sampler, 'max_anisotropy')
 
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_PT_matl_data_blend_states(MaterialPanel):
     bl_label = "Blend States"
     bl_parent_id = SUB_PT_matl_data_master.bl_idname
@@ -223,6 +251,10 @@ class SUB_PT_matl_data_blend_states(MaterialPanel):
             row = box.row()
             row.label(text="Alpha Sample To Coverage")
             row.prop(blend_state, "alpha_sample_to_coverage", text="")
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_PT_matl_data_rasterizer_states(MaterialPanel):
@@ -248,6 +280,10 @@ class SUB_PT_matl_data_rasterizer_states(MaterialPanel):
             row.label(text="Fill Mode")
             row.prop(rasterizer_state, "fill_mode", text="")
 
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_PT_matl_data_linked_materials(MaterialPanel):
     bl_label = "Linked Materials"
     bl_parent_id = SUB_PT_matl_data_master.bl_idname
@@ -269,6 +305,10 @@ class SUB_PT_matl_data_linked_materials(MaterialPanel):
         for linked_material in sub_matl_data.linked_materials:
             row = box.row()
             row.label(text=f"Linked Blender Material: '{linked_material.blender_material.name}'", icon='MATERIAL')
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
             # TODO: Allow Editing?
 
 
@@ -370,6 +410,10 @@ class PG_PT_smash_texture_materials(Panel):
                 
                 # Option to export material
                 layout.operator(operators.SUB_OP_export_material_to_matl.bl_idname, text="Export Material to MATL")
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_OP_visualize_texture_mapping(bpy.types.Operator):

@@ -20,7 +20,6 @@ PRESETS_PANEL_ID = "SUB_PT_panel_presets"
 PANEL_META = (
     ("SUB_PT_import_model", "Model Importer"),
     ("SUB_PT_export_model", "Model Exporter"),
-    ("SUB_PT_ultimate_exo_skel", "Magic Exo Skel Maker"),
     ("SUB_PT_import_anim", "Animation Importer"),
     ("SUB_PT_raw_animations", "Raw Animations"),
     ("SUB_PT_export_anim", "Animation Exporter"),

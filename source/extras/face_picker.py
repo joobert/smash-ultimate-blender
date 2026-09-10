@@ -1854,6 +1854,7 @@ class SUB_OP_face_picker_apply(Operator):
 
 
 class SUB_OP_face_picker_canvas(Operator):
+    bl_description = 'Open the interactive face picker to select and arrange expression thumbnails'
     bl_idname = "sub.face_picker_canvas"
     bl_label = "Face Picker Canvas"
     bl_options = {"INTERNAL"}
@@ -2016,6 +2017,7 @@ class SUB_OP_face_picker_create_camera(Operator):
 
 
 class SUB_OP_face_picker_remove_camera(Operator):
+    bl_description = 'Delete the camera created for face expression thumbnails'
     bl_idname = "sub.face_picker_remove_camera"
     bl_label = "Remove Face Camera"
     bl_options = {"REGISTER", "UNDO"}
@@ -2129,6 +2131,7 @@ class SUB_OP_face_picker_select_facial(Operator):
 
 
 class SUB_OP_face_picker_clear_tracks(Operator):
+    bl_description = 'Clear the visibility and material tracks assigned to this expression'
     bl_idname = "sub.face_picker_clear_tracks"
     bl_label = "Clear Assigned Tracks"
 
@@ -2207,6 +2210,7 @@ class SUB_OP_face_picker_match_selected_bones(Operator):
 
 
 class SUB_OP_face_picker_clear_bones(Operator):
+    bl_description = 'Clear the pose bones assigned to this expression'
     bl_idname = "sub.face_picker_clear_bones"
     bl_label = "Clear Assigned Bones"
 
@@ -2329,6 +2333,7 @@ class SUB_OP_face_picker_add(Operator):
 
 
 class SUB_OP_face_picker_remove(Operator):
+    bl_description = 'Delete the selected expression from the face picker'
     bl_idname = "sub.face_picker_remove"
     bl_label = "Remove Expression"
     bl_options = {"REGISTER", "UNDO"}
@@ -2718,7 +2723,12 @@ class SUB_PT_face_picker(Panel):
         return False
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         draw_face_picker_layout(self.layout, context, show_grid=True)
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_PT_face_picker_window(Panel):
@@ -2733,7 +2743,12 @@ class SUB_PT_face_picker_window(Panel):
         return _is_picker_screen(getattr(context, "screen", None))
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         draw_popup_picker_layout(self.layout, context)
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_PT_face_picker_anim_data(Panel):
@@ -2751,7 +2766,12 @@ class SUB_PT_face_picker_anim_data(Panel):
         return context.object.type == "ARMATURE"
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         draw_face_picker_layout(self.layout, context, show_grid=False)
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 def _draw_texture_2d_compat(texture, position, width, height):

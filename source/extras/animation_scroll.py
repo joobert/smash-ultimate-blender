@@ -445,6 +445,7 @@ class SUB_OT_animation_sequence(Operator):
 
 
 class SUB_OT_toggle_animation_sequence(Operator):
+    bl_description = 'Start or stop playing loaded animations in sequence'
     bl_idname = "sub.toggle_animation_sequence"
     bl_label = "Toggle Animation Sequence"
 

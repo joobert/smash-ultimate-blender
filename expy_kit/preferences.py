@@ -8,6 +8,7 @@ from . import preset_handler
 
 class ExpyToClipboard(bpy.types.Operator):
     """Copy Expy Kit Preferences to the clipboard"""
+    bl_description = 'Copy Expy Kit Preferences to the clipboard'
     bl_idname = "wm.expy_to_clipboard"
     bl_label = "Copy Stuff to the clipboard"
 

@@ -523,6 +523,7 @@ def finish_calibration(context, arm):
 
 
 class SUB_OP_floor_contact(Operator):
+    bl_description = 'Place selected foot IK controls on the configured floor and manage their contact locks'
     bl_idname = 'sub.floor_contact'
     bl_label = 'IK Floor Contact'
     bl_options = {'REGISTER', 'UNDO'}

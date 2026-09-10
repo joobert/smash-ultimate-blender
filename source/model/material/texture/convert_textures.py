@@ -1700,6 +1700,7 @@ def create_default_prm_texture(output_path, size=1024):
 
 class ULTIMATE_OT_create_nor_from_material(bpy.types.Operator):
     """Create a NOR texture from the active material's Principled BSDF shader"""
+    bl_description = "Create a NOR texture from the active material's Principled BSDF shader"
     bl_idname = "ultimate.create_nor_from_material"
     bl_label = "Create NOR from Material"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1763,6 +1764,7 @@ class ULTIMATE_OT_create_nor_from_material(bpy.types.Operator):
 
 class ULTIMATE_OT_create_prm_from_material(bpy.types.Operator):
     """Create a PRM texture from the active material's Principled BSDF shader"""
+    bl_description = "Create a PRM texture from the active material's Principled BSDF shader"
     bl_idname = "ultimate.create_prm_from_material"
     bl_label = "Create PRM from Material"
     bl_options = {'REGISTER', 'UNDO'}

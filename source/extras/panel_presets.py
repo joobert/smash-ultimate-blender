@@ -505,6 +505,7 @@ class SUB_OP_panel_preset_duplicate(Operator):
 
 
 class SUB_OP_panel_preset_select_all(Operator):
+    bl_description = 'Enable every available panel in the active sidebar preset'
     bl_idname = "sub.panel_preset_select_all"
     bl_label = "Enable All Panels"
     bl_options = {"REGISTER", "UNDO"}
@@ -646,6 +647,7 @@ class SUB_PT_panel_presets(Panel):
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         scene = context.scene
         presets = getattr(scene, "sub_panel_presets", None)
@@ -732,6 +734,10 @@ class SUB_PT_panel_presets(Panel):
             text="Changes apply immediately. Save Presets for other .blend files.",
             icon="INFO",
         )
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 classes = (

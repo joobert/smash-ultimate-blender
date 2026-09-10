@@ -339,6 +339,7 @@ class SUB_PT_ultimate_exo_skel(Panel):
     bl_region_type = 'UI'
     bl_category = 'Ultimate'
     bl_label = 'Magic Exo Skel Maker'
+    bl_parent_id = 'SUB_PT_model_tools'
     bl_options = {'DEFAULT_CLOSED'}
     
     @classmethod
@@ -346,6 +347,7 @@ class SUB_PT_ultimate_exo_skel(Panel):
         return context.mode in {'OBJECT', 'EDIT_ARMATURE', 'POSE'}
     
     def draw(self, context):
+        self.layout.use_property_decorate = False
         ssp: SubSceneProperties = context.scene.sub_scene_properties
         layout = self.layout
         layout.use_property_split = False
@@ -439,3 +441,7 @@ class SUB_PT_ultimate_exo_skel(Panel):
         # Align Smash Bones to Exo Bones button (moved down)
         row = box.row(align=True)
         row.operator("sub.align_exo_bones", text="Align Smash Bones to Exo Bones")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)

@@ -14,6 +14,7 @@ class SUB_PT_update_plugin(Panel):
         return bool(UPDATE_AVAILABLE) and not LOCAL_VERSION_AHEAD
     
     def draw(self, context):
+        self.layout.use_property_decorate = False
         from ...__init__ import bl_info
         from .version_check import LATEST_COMMIT_SHA, LATEST_COMMIT_MESSAGE, LATEST_COMMIT_DATE, CURRENT_COMMIT_SHA, CURRENT_COMMIT_MESSAGE, UPDATE_STATUS, UPDATE_DOWNLOAD_PROGRESS
 
@@ -63,7 +64,7 @@ class SUB_PT_update_plugin(Panel):
         if UPDATE_STATUS == "idle":
             layout.row().operator("sub.check_for_updates", text="Refresh Update Check")
             col = layout.column()
-            col.scale_y = 1.5
+            col.scale_y = 1.0
             col.operator("sub.download_update", text="Download & Install Update", icon='IMPORT')
             
         elif UPDATE_STATUS == "checking":
@@ -81,6 +82,10 @@ class SUB_PT_update_plugin(Panel):
             layout.row().label(text="Please wait, Blender will restart automatically!")
             layout.row().label(text="Do not close Blender manually!", icon='ERROR')
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_PT_updater_settings(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -97,6 +102,7 @@ class SUB_PT_updater_settings(Panel):
         return bool(UPDATE_AVAILABLE) and not LOCAL_VERSION_AHEAD
     
     def draw(self, context):
+        self.layout.use_property_decorate = False
         from .version_check import UPDATE_STATUS
 
         layout = self.layout
@@ -114,3 +120,7 @@ class SUB_PT_updater_settings(Panel):
         layout.row().label(text="Repository: CrusherD2/smash-ultimate-blender")
         layout.row().label(text="Branch: animation-workflow")
         layout.row().label(text="Updates monitor commits on this branch")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)

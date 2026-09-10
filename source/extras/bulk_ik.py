@@ -262,6 +262,7 @@ class SUB_OP_bulk_ik_pick_bone(bpy.types.Operator):
 
 class SUB_OP_bulk_ik_match_all(bpy.types.Operator):
     """Create leg IK and match FK to IK for every loaded animation on the armature"""
+    bl_description = 'Create leg IK and match FK to IK for every loaded animation on the armature'
     bl_idname = "sub.bulk_ik_match_all"
     bl_label = "Run Bulk IK"
     bl_options = {"REGISTER", "UNDO"}
@@ -392,6 +393,7 @@ class SUB_OP_bulk_ik_match_all(bpy.types.Operator):
 
 class SUB_OP_bulk_ik_bake_all(bpy.types.Operator):
     """Bake IK to FK for every loaded animation, then remove the IK rig"""
+    bl_description = 'Bake IK to FK for every loaded animation, then remove the IK rig'
     bl_idname = "sub.bulk_ik_bake_all"
     bl_label = "Bulk Bake & Remove IK"
     bl_options = {"REGISTER", "UNDO"}

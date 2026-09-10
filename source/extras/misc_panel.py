@@ -34,13 +34,14 @@ class SUB_PT_animation_tools(Panel):
         return context.mode in modes
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         ssp: SUB_PG_sub_anim_data = context.scene.sub_scene_properties
 
         layout = self.layout
         layout.use_property_split = False
 
         row = layout.row(align=True)
-        row.scale_y = 1.5
+        row.scale_y = 1.0
         row.operator("sub.create_animation_rig", text="Create Animation Rig", icon="OUTLINER_OB_ARMATURE")
         row.operator("sub.remove_animation_rig", text="", icon="X")
         layout.prop(ssp, "clean_keyframes_after_rig", text="Clean keyframes after creation")
@@ -342,6 +343,10 @@ class SUB_PT_animation_tools(Panel):
             col.operator("sub.remove_swing_bone_animation", text="Remove Animation from Swing Bones")
             col.operator("sub.gif_or_photo", text="GIF or Photo", icon="RENDER_ANIMATION")
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_PT_model_tools(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -355,6 +360,7 @@ class SUB_PT_model_tools(Panel):
         return context.mode in modes
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
         ssp = context.scene.sub_scene_properties
@@ -455,6 +461,10 @@ class SUB_PT_model_tools(Panel):
         help_box.label(text="Matches bone names exactly (case-sensitive).", icon="INFO")
         help_box.label(text="Only roll values are changed.")
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_PT_misc_utilities(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -468,6 +478,7 @@ class SUB_PT_misc_utilities(Panel):
         return context.mode in modes
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
 
@@ -566,6 +577,10 @@ class SUB_PT_misc_utilities(Panel):
                 text="Convert All to Principled BSDF",
                 icon="MATERIAL",
             )
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_OP_mirror_vertex_groups(bpy.types.Operator):
@@ -783,6 +798,7 @@ class SUB_OT_add_param_labels_path(Operator):
 
 
 class SUB_OT_remove_param_labels_path(Operator):
+    bl_description = 'Remove the selected labels file from the plugin configuration; keep the file on disk'
     bl_idname = "sub.remove_param_labels_path"
     bl_label = "Remove ParamLabels File"
 

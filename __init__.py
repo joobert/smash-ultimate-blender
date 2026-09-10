@@ -90,6 +90,9 @@ def register():
     from .source import doctor
     doctor.register()
 
+    from .source.anim import motion_list_ui
+    motion_list_ui.register()
+
     # Last, once every panel exists: Panel Presets owns both sidebar visibility
     # and sidebar order, and its registration applies the saved layout.
     from .source.extras import panel_presets
@@ -109,6 +112,9 @@ def unregister():
     # Unregister panel presets first (restores original panel polls)
     from .source.extras import panel_presets
     panel_presets.unregister()
+
+    from .source.anim import motion_list_ui
+    motion_list_ui.unregister()
 
     from .source import doctor
     doctor.unregister()

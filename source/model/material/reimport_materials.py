@@ -21,6 +21,7 @@ class SUB_PT_reimport_materials(Panel):
         return True
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         ssp: SubSceneProperties = context.scene.sub_scene_properties
         layout = self.layout
         layout.use_property_split = False
@@ -59,6 +60,10 @@ class SUB_PT_reimport_materials(Panel):
         row.prop(ssp, 'material_reimport_copy_source_arma', icon='ARMATURE_DATA', text='Source')
         row = box.row(align=True)
         row.operator('sub.copy_materials_from_armature', icon='PASTEDOWN', text='Copy Materials')
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_OP_mat_reimport_directory_selector(Operator):
     bl_idname = 'sub.mat_reimport_dir_selector'
@@ -113,6 +118,7 @@ class SUB_OP_mat_reimport_numatb_selector(Operator):
         return {'FINISHED'}   
 
 class SUB_OP_reimport_materials(Operator):
+    bl_description = 'Reload Smash materials from disk onto the selected model'
     bl_idname = 'sub.reimport_materials'
     bl_label = 'Reimport Materials'
 

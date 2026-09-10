@@ -450,6 +450,7 @@ def bake_and_clean_current_action(context, armature_object, leg_bone_map=None, r
 
 class SUB_OP_apply_ik_animation_operator(bpy.types.Operator):
     """Bake IK Animation to Original Bones and Remove IK Bones"""
+    bl_description = 'Bake IK Animation to Original Bones and Remove IK Bones'
     bl_idname = "sub.apply_ik_animation"
     bl_label = "Apply IK Animation"
     bl_options = {"REGISTER", "UNDO"}
@@ -488,8 +489,13 @@ class SUB_PT_apply_ik_animation_panel(bpy.types.Panel):
     bl_category = "IK Bones"
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.operator("sub.apply_ik_animation", text="Bake & Remove IK")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 def register():

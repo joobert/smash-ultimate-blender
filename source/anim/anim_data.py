@@ -373,6 +373,10 @@ class SUB_PT_sub_smush_anim_data_main(Panel):
             col.label(text="Off: use Manual Sync after switching actions.", icon='INFO')
         layout.operator("sub.face_picker_popup", text="Easy Facial Animation", icon="IMAGE_DATA")
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_PT_sub_smush_anim_data_vis_tracks(Panel):
     bl_label = "Ultimate Visibility Track Entries"
     bl_space_type = 'PROPERTIES'
@@ -415,6 +419,10 @@ class SUB_PT_sub_smush_anim_data_vis_tracks(Panel):
         op.scope = 'CURRENT'
         op = row.operator(SUB_OP_purge_unused_vis_tracks.bl_idname, text="Purge All Anims", icon='TRASH')
         op.scope = 'ALL'
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_PT_sub_smush_anim_data_mat_tracks(Panel):
     bl_label = "Ultimate Material Tracks"
@@ -514,7 +522,12 @@ class SUB_PT_sub_smush_anim_data_mat_tracks(Panel):
         sr = split.row(align=True)
         sr.menu('SUB_MT_mat_entry_context_menu', text='Drivers...')      
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_OP_mat_track_add(Operator):
+    bl_description = 'Add an animated material track to the active armature'
     bl_idname = 'sub.mat_track_add'
     bl_label  = 'Add Mat Track'
 
@@ -527,6 +540,7 @@ class SUB_OP_mat_track_add(Operator):
         return {'FINISHED'}
 
 class SUB_OP_mat_track_remove(Operator):
+    bl_description = 'Remove the selected material animation track and its properties'
     bl_idname = 'sub.mat_track_remove'
     bl_label = 'Remove Mat Track'
 
@@ -582,6 +596,7 @@ class SUB_OP_mat_track_remove(Operator):
         return {'FINISHED'}
 
 class SUB_OP_mat_property_add(Operator):
+    bl_description = 'Add an animated shader property to the selected material track'
     bl_idname = 'sub.mat_prop_add'
     bl_label = 'Add Material Property'
     bl_property = "sub_type"
@@ -622,6 +637,7 @@ def refresh_material_drivers(context):
     setup_material_drivers(context.object)
 
 class SUB_OP_mat_property_remove(Operator):
+    bl_description = 'Remove the selected animated shader property from its material track'
     bl_idname = 'sub.mat_prop_remove'
     bl_label = 'Remove Material Property'
 
@@ -709,6 +725,7 @@ def swap_mat_property_fcurve_target_indices(fcurves, sap, index_a, index_b):
         change_mat_property_fcurve_target_index(fc, index_a)
           
 class SUB_OP_mat_property_shift(Operator):
+    bl_description = 'Move the selected material property up or down in the list'
     bl_idname = 'sub.mat_property_shift'
     bl_label = 'Shift Mat Propery'
 
@@ -749,6 +766,7 @@ class SUB_OP_mat_property_shift(Operator):
         return {'FINISHED'}
     
 class SUB_OP_vis_entry_add(Operator):
+    bl_description = 'Add a mesh visibility track to the active armature'
     bl_idname = 'sub.vis_entry_add'
     bl_label = 'Add Vis Track Entry'
 
@@ -767,6 +785,7 @@ def refresh_visibility_drivers(context):
     setup_visibility_drivers(context.object)
 
 class SUB_OP_vis_entry_remove(Operator):
+    bl_description = 'Remove the selected mesh visibility track'
     bl_idname = 'sub.vis_entry_remove'
     bl_label = 'Remove Vis Track Entry'
 
@@ -795,6 +814,7 @@ class SUB_OP_vis_entry_remove(Operator):
         return {'FINISHED'} 
     
 class SUB_OP_vis_entry_shift(Operator):
+    bl_description = 'Move the selected visibility track up or down in the list'
     bl_idname = 'sub.vis_entry_shift'
     bl_label = 'Shift Vis Entry'
 
@@ -833,6 +853,7 @@ class SUB_OP_vis_entry_shift(Operator):
         return {'FINISHED'}
 
 class SUB_OP_vis_drivers_refresh(Operator):
+    bl_description = 'Rebuild mesh visibility drivers from the armature visibility tracks'
     bl_idname = 'sub.vis_drivers_refresh'
     bl_label = 'Refresh Visibility Drivers'
 
@@ -841,6 +862,7 @@ class SUB_OP_vis_drivers_refresh(Operator):
         return {'FINISHED'} 
 
 class SUB_OP_vis_drivers_remove(Operator):
+    bl_description = 'Remove the drivers that connect mesh visibility to animation tracks'
     bl_idname = 'sub.vis_drivers_remove'
     bl_label = 'Remove Visibility Drivers'
 
@@ -912,6 +934,7 @@ class SUB_OP_purge_unused_vis_tracks(Operator):
         return {'FINISHED'}
 
 class SUB_OP_auto_fill_vis_entries(Operator):
+    bl_description = 'Create visibility tracks from meshes belonging to the active armature'
     bl_idname = 'sub.auto_fill_vis_entries'
     bl_label = 'Auto Fill Vis Entries'
 
@@ -937,6 +960,7 @@ class SUB_OP_auto_fill_vis_entries(Operator):
         return {'FINISHED'}
 
 class SUB_OP_set_all_vis_entries_false(Operator):
+    bl_description = 'Hide every mesh controlled by a visibility track'
     bl_idname = 'sub.set_all_vis_entries_false'
     bl_label = 'Set All Vis Entries False'
 
@@ -952,6 +976,7 @@ class SUB_OP_set_all_vis_entries_false(Operator):
         return {'FINISHED'}
 
 class SUB_OP_set_all_vis_entries_true(Operator):
+    bl_description = 'Show every mesh controlled by a visibility track'
     bl_idname = 'sub.set_all_vis_entries_true'
     bl_label = 'Set All Vis Entries True'
 
@@ -967,6 +992,7 @@ class SUB_OP_set_all_vis_entries_true(Operator):
         return {'FINISHED'}
 
 class SUB_OP_insert_all_vis_entry_keyframes(Operator):
+    bl_description = 'Keyframe every visibility track at the current frame'
     bl_idname = 'sub.insert_all_vis_entry_keyframes'
     bl_label = 'Insert All Vis Entry Keyframes'
 
@@ -986,6 +1012,7 @@ class SUB_OP_insert_all_vis_entry_keyframes(Operator):
         return {'FINISHED'}
 
 class SUB_OP_organize_vis_entries_alphabetically(Operator):
+    bl_description = 'Sort visibility tracks alphabetically by their names'
     bl_idname = 'sub.organize_vis_entries_alphabetically'
     bl_label = 'Organize Vis Entries Alphabetically'
 
@@ -1014,6 +1041,7 @@ class SUB_OP_organize_vis_entries_alphabetically(Operator):
         return {'FINISHED'}
 
 class SUB_OP_organize_vis_entries_by_move(Operator):
+    bl_description = 'Group visibility tracks by the move names in their labels'
     bl_idname = 'sub.organize_vis_entries_by_move'
     bl_label = 'Organize Vis Entries by Move'
 
@@ -1064,6 +1092,7 @@ def remove_anim_material_drivers(arma:bpy.types.Object):
             setup_sub_matl_data_node_drivers(sub_matl_data)    
 
 class SUB_OP_mat_drivers_refresh(Operator):
+    bl_description = 'Rebuild material drivers so shader values follow animated material tracks'
     bl_idname = 'sub.mat_drivers_refresh'
     bl_label = 'Refresh Material Drivers'   
 
@@ -1072,6 +1101,7 @@ class SUB_OP_mat_drivers_refresh(Operator):
         return {'FINISHED'}  
 
 class SUB_OP_mat_drivers_remove(Operator):
+    bl_description = 'Remove the drivers connecting shaders to material animation tracks'
     bl_idname = 'sub.mat_drivers_remove'
     bl_label = 'Remove Material Drivers'
 

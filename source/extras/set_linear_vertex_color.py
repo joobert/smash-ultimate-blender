@@ -32,7 +32,8 @@ def main(context: Context):
 
 
 class SUB_OP_LinearColorSet(bpy.types.Operator):
-    """Tooltip"""
+    """Fill vertex colors from the active brush in linear color space."""
+    bl_description = 'Set vertex colors using linear color values for Smash materials'
     bl_idname = "paint.sub_vertex_color_set_linear"
     bl_label = "Set Vertex Colors (Linear)"
 

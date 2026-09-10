@@ -117,6 +117,7 @@ def is_end_bone_valid(end_bone: bpy.types.Bone) -> bool:
     return len(end_bone.children) == 1
 
 class SUB_OP_swing_bone_chain_add(Operator):
+    bl_description = 'Create a physics chain between the chosen start and end bones'
     bl_idname = 'sub.swing_bone_chain_add'
     bl_label = 'Add Swing Bone Chain'
     bl_options = {'REGISTER', 'UNDO'}
@@ -404,6 +405,7 @@ class SUB_OP_swing_bone_chain_auto_detect(Operator):
         return (start_bone, end_bone, bones_in_chain)
 
 class SUB_OP_swing_bone_chain_remove(Operator):
+    bl_description = 'Delete the selected physics chain from the swing data'
     bl_idname = 'sub.swing_bone_chain_remove'
     bl_label = 'Remove Swing Bone Chain'
 
@@ -434,6 +436,7 @@ class SUB_OP_swing_bone_chain_remove(Operator):
         return {'FINISHED'}
 
 class SUB_OP_swing_bone_chain_length_edit(Operator):
+    bl_description = 'Change the start and end bones of the selected physics chain'
     bl_idname = 'sub.swing_bone_chain_length_edit'
     bl_label = 'Edit Start/End of Swing Bone Chain'
 
@@ -449,6 +452,7 @@ def get_spheres_enum(self, context):
     return [(s.name, s.name, s.name) for index, s in enumerate(ssd.spheres) if index not in existing_indices]
 
 class SUB_OP_swing_bone_collision_add_sphere(Operator):
+    bl_description = 'Assign a sphere collision to the selected swing bone'
     bl_idname = 'sub.swing_bone_collision_add_sphere'
     bl_label = 'Add Swing Bone Sphere Collision'
     bl_property = 'sphere'
@@ -488,6 +492,7 @@ def get_ovals_enum(self, context):
     return [(s.name, s.name, s.name) for index, s in enumerate(ssd.ovals) if index not in existing_indices]
 
 class SUB_OP_swing_bone_collision_add_oval(Operator):
+    bl_description = 'Assign a oval collision to the selected swing bone'
     bl_idname = 'sub.swing_bone_collision_add_oval'
     bl_label = 'Add Swing Bone Oval Collision'
     bl_property = 'oval'
@@ -526,6 +531,7 @@ def get_ellipsoids_enum(self, context):
     return [(s.name, s.name, s.name) for index, s in enumerate(ssd.ellipsoids) if index not in existing_indices]
 
 class SUB_OP_swing_bone_collision_add_ellipsoid(Operator):
+    bl_description = 'Assign a ellipsoid collision to the selected swing bone'
     bl_idname = 'sub.swing_bone_collision_add_ellipsoid'
     bl_label = 'Add Swing Bone Ellipsoid Collision'
     bl_property = 'ellipsoid'
@@ -564,6 +570,7 @@ def get_capsules_enum(self, context):
     return [(s.name, s.name, s.name) for index, s in enumerate(ssd.capsules) if index not in existing_indices]
 
 class SUB_OP_swing_bone_collision_add_capsule(Operator):
+    bl_description = 'Assign a capsule collision to the selected swing bone'
     bl_idname = 'sub.swing_bone_collision_add_capsule'
     bl_label = 'Add Swing Bone Capsule Collision'
     bl_property = 'capsule'
@@ -602,6 +609,7 @@ def get_planes_enum(self, context):
     return [(s.name, s.name, s.name) for index, s in enumerate(ssd.planes) if index not in existing_indices]
 
 class SUB_OP_swing_bone_collision_add_plane(Operator):
+    bl_description = 'Assign a plane collision to the selected swing bone'
     bl_idname = 'sub.swing_bone_collision_add_plane'
     bl_label = 'Add Swing Bone Plane Collision'
     bl_property = 'plane'
@@ -633,6 +641,7 @@ class SUB_OP_swing_bone_collision_add_plane(Operator):
         return {'FINISHED'}               
 
 class SUB_OP_swing_bone_collision_remove(Operator):
+    bl_description = 'Remove the selected collision assignment from this swing bone'
     bl_idname = 'sub.swing_bone_collision_remove'
     bl_label = 'Remove Swing Bone Collision'
 
@@ -657,6 +666,7 @@ class SUB_OP_swing_bone_collision_remove(Operator):
 
 
 class SUB_OP_swing_data_sphere_add(Operator):
+    bl_description = 'Create a sphere collision shape in the swing data'
     bl_idname = 'sub.swing_data_sphere_add'
     bl_label = 'Add Sphere Collision'
     
@@ -785,6 +795,7 @@ def remove_active_collision_from_collection(collision_type: str, sub_swing_data:
       
 
 class SUB_OP_swing_data_sphere_remove(Operator):
+    bl_description = 'Delete the selected sphere collision from the swing data'
     bl_idname = 'sub.swing_data_sphere_remove'
     bl_label = 'Remove Sphere Collision'
 
@@ -810,6 +821,7 @@ class SUB_OP_swing_data_sphere_remove(Operator):
 
 
 class SUB_OP_swing_data_oval_add(Operator):
+    bl_description = 'Create a oval collision shape in the swing data'
     bl_idname = 'sub.swing_data_oval_add'
     bl_label = 'Add Oval Collision'
 
@@ -907,6 +919,7 @@ class SUB_OP_swing_data_oval_add(Operator):
 
 
 class SUB_OP_swing_data_oval_remove(Operator):
+    bl_description = 'Delete the selected oval collision from the swing data'
     bl_idname = 'sub.swing_data_oval_remove'
     bl_label = 'Remove Oval Collision'
 
@@ -931,6 +944,7 @@ class SUB_OP_swing_data_oval_remove(Operator):
 
 
 class SUB_OP_swing_data_ellipsoid_add(Operator):
+    bl_description = 'Create a ellipsoid collision shape in the swing data'
     bl_idname = 'sub.swing_data_ellipsoid_add'
     bl_label = 'Add Ellipsoid Collision'
 
@@ -1016,6 +1030,7 @@ class SUB_OP_swing_data_ellipsoid_add(Operator):
         return {'FINISHED'}
 
 class SUB_OP_swing_data_ellipsoid_remove(Operator):
+    bl_description = 'Delete the selected ellipsoid collision from the swing data'
     bl_idname = 'sub.swing_data_ellipsoid_remove'
     bl_label = 'Remove Ellipsoids Collision'
 
@@ -1039,6 +1054,7 @@ class SUB_OP_swing_data_ellipsoid_remove(Operator):
     
 
 class SUB_OP_swing_data_capsule_add(Operator):
+    bl_description = 'Create a capsule collision shape in the swing data'
     bl_idname = 'sub.swing_data_capsule_add'
     bl_label = 'Add Capsule Collision'
 
@@ -1139,6 +1155,7 @@ class SUB_OP_swing_data_capsule_add(Operator):
         return {'FINISHED'}
 
 class SUB_OP_swing_data_capsule_remove(Operator):
+    bl_description = 'Delete the selected capsule collision from the swing data'
     bl_idname = 'sub.swing_data_capsule_remove'
     bl_label = 'Remove Capsule Collision'
 
@@ -1162,6 +1179,7 @@ class SUB_OP_swing_data_capsule_remove(Operator):
     
 
 class SUB_OP_swing_data_plane_add(Operator):
+    bl_description = 'Create a plane collision shape in the swing data'
     bl_idname = 'sub.swing_data_plane_add'
     bl_label = 'Add Plane Collision'
 
@@ -1253,6 +1271,7 @@ class SUB_OP_swing_data_plane_add(Operator):
         return {'FINISHED'}
 
 class SUB_OP_swing_data_plane_remove(Operator):
+    bl_description = 'Delete the selected plane collision from the swing data'
     bl_idname = 'sub.swing_data_plane_remove'
     bl_label = 'Remove Plane Collision'
 
@@ -1276,6 +1295,7 @@ class SUB_OP_swing_data_plane_remove(Operator):
     
 
 class SUB_OP_swing_data_connection_add(Operator):
+    bl_description = 'Create a connection collision between swing bones'
     bl_idname = 'sub.swing_data_connection_add'
     bl_label = 'Add Swing Bone Connection Collision'
 
@@ -1356,6 +1376,7 @@ class SUB_OP_swing_data_connection_add(Operator):
         return {'FINISHED'}
 
 class SUB_OP_swing_data_connection_remove(Operator):
+    bl_description = 'Delete the selected connection collision from the swing data'
     bl_idname = 'sub.swing_data_connection_remove'
     bl_label = 'Remove Swing Bone Connection Collision'
 
@@ -2507,6 +2528,7 @@ def swing_prc_export(operator: Operator, context: Context, filepath: str):
 
 class SUB_OT_swing_preset_add(bpy.types.Operator):
     """Save the physical property values of the current swing bone as a preset"""
+    bl_description = 'Save the physical property values of the current swing bone as a preset'
     bl_idname = "sub.swing_preset_add"
     bl_label = "Add Swing Values Preset"
     bl_options = {'REGISTER', 'UNDO'}
@@ -2588,6 +2610,7 @@ class SUB_OT_swing_preset_add(bpy.types.Operator):
 
 class SUB_OT_swing_preset_remove(bpy.types.Operator):
     """Delete the selected preset"""
+    bl_description = 'Delete the selected preset'
     bl_idname = "sub.swing_preset_remove"
     bl_label = "Remove Swing Values Preset"
     bl_options = {'REGISTER', 'UNDO'}
@@ -2628,6 +2651,7 @@ class SUB_OT_swing_preset_remove(bpy.types.Operator):
 
 class SUB_OT_swing_preset_apply(bpy.types.Operator):
     """Apply physical property values from the selected preset to the current swing bone"""
+    bl_description = 'Apply physical property values from the selected preset to the current swing bone'
     bl_idname = "sub.swing_preset_apply"
     bl_label = "Apply Swing Values Preset"
     bl_options = {'REGISTER', 'UNDO'}
@@ -2676,6 +2700,7 @@ def get_preset_names():
 
 class SUB_OT_swing_chain_preset_add(bpy.types.Operator):
     """Save the physical property values of the current swing bone chain as a preset"""
+    bl_description = 'Save the physical property values of the current swing bone chain as a preset'
     bl_idname = "sub.swing_chain_preset_add"
     bl_label = "Add Swing Chain Preset"
     bl_options = {'REGISTER', 'UNDO'}
@@ -2822,6 +2847,7 @@ class SUB_OT_swing_chain_preset_add(bpy.types.Operator):
 
 class SUB_OT_swing_chain_preset_remove(bpy.types.Operator):
     """Delete the selected chain preset"""
+    bl_description = 'Delete the selected chain preset'
     bl_idname = "sub.swing_chain_preset_remove"
     bl_label = "Remove Swing Chain Preset"
     bl_options = {'REGISTER', 'UNDO'}
@@ -2863,6 +2889,7 @@ class SUB_OT_swing_chain_preset_remove(bpy.types.Operator):
 
 class SUB_OT_swing_chain_preset_apply(bpy.types.Operator):
     """Apply physical property values from the selected chain preset to the current swing bone chain"""
+    bl_description = 'Apply physical property values from the selected chain preset to the current swing bone chain'
     bl_idname = "sub.swing_chain_preset_apply"
     bl_label = "Apply Swing Chain Preset"
     bl_options = {'REGISTER', 'UNDO'}
@@ -2902,6 +2929,7 @@ class SUB_OT_swing_chain_preset_apply(bpy.types.Operator):
 
 class SUB_OT_swing_chain_preset_apply_mismatch(bpy.types.Operator):
     """Handle bone count mismatch when applying chain presets with flexible bone mapping"""
+    bl_description = 'Handle bone count mismatch when applying chain presets with flexible bone mapping'
     bl_idname = "sub.swing_chain_preset_apply_mismatch"
     bl_label = "Apply Chain Preset - Bone Mapping"
     bl_options = {'REGISTER', 'UNDO'}
@@ -3067,6 +3095,7 @@ class SUB_OT_swing_chain_preset_apply_mismatch(bpy.types.Operator):
 
 class SUB_OT_swing_chain_preset_mapping_auto(bpy.types.Operator):
     """Automatically map preset bones to target bones in order"""
+    bl_description = 'Automatically map preset bones to target bones in order'
     bl_idname = "sub.swing_chain_preset_mapping_auto"
     bl_label = "Auto Map Bones"
     bl_options = {'REGISTER', 'UNDO'}
@@ -3099,6 +3128,7 @@ class SUB_OT_swing_chain_preset_mapping_auto(bpy.types.Operator):
 
 class SUB_OT_swing_chain_preset_mapping_clear(bpy.types.Operator):
     """Clear all bone mappings"""
+    bl_description = 'Clear all bone mappings'
     bl_idname = "sub.swing_chain_preset_mapping_clear"
     bl_label = "Clear All Mappings"
     bl_options = {'REGISTER', 'UNDO'}

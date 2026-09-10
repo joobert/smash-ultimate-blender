@@ -10,6 +10,7 @@ class SUB_OP_align_ik_pole_angle(bpy.types.Operator):
     Uses FK bone positions as the target: projects FK bone direction and pole 
     direction onto the plane perpendicular to the FK middle bone, then calculates 
     the pole angle needed. Perfect for seamless FK-to-IK transitions."""
+    bl_description = 'Calculate pole angles to make IK pose match the current FK pose.'
     bl_idname = "sub.align_ik_pole_angle"
     bl_label = "Align IK to FK Pose"
     bl_options = {'REGISTER', 'UNDO'}

@@ -306,6 +306,7 @@ class SUB_PT_import_model(Panel):
         return True
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         ssp: SubSceneProperties = context.scene.sub_scene_properties
         layout = self.layout
         layout.use_property_split = False
@@ -338,6 +339,10 @@ class SUB_PT_import_model(Panel):
 
         row = layout.row()
         row.operator(SUB_OP_import_selected_model.bl_idname, text="Import Selected Model")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_OP_select_model_import_folder(Operator):
     bl_idname = 'sub.ssbh_model_folder_selector'
@@ -396,6 +401,7 @@ class SUB_OP_refresh_model_import_list(Operator):
         return {'FINISHED'}
 
 class SUB_OP_import_model(bpy.types.Operator):
+    bl_description = 'Import a Smash model, including its meshes, skeleton, and materials'
     bl_idname = 'sub.model_importer'
     bl_label = 'Model Importer'
     bl_options = {'UNDO'}
@@ -484,6 +490,7 @@ def _resolve_model_path(folder: Path, fallback: Path, filename: str, suffix: str
 
 
 class SUB_OP_import_selected_model(bpy.types.Operator):
+    bl_description = 'Import the model selected in the model folder browser'
     bl_idname = 'sub.import_selected_model'
     bl_label = 'Import Selected Model'
     bl_options = {'UNDO'}

@@ -3,6 +3,7 @@ from bpy.types import Operator
 
 class SUB_OT_rename_materials_to_mesh(Operator):
     """Rename materials to match their mesh names for selected objects"""
+    bl_description = 'Rename materials to match their mesh names for selected objects'
     bl_idname = "sub.rename_materials_to_mesh"
     bl_label = "Rename Materials to Mesh"
     bl_options = {'REGISTER', 'UNDO'}
@@ -59,6 +60,7 @@ class SUB_OT_rename_materials_to_mesh(Operator):
 
 class SUB_OT_rename_textures_to_material(Operator):
     """Rename texture images to match their material names for selected objects"""
+    bl_description = 'Rename texture images to match their material names for selected objects'
     bl_idname = "sub.rename_textures_to_material"
     bl_label = "Rename Textures to Material"
     bl_options = {'REGISTER', 'UNDO'}

@@ -119,6 +119,7 @@ CONSTR_TYPES.append('ALL_TYPES')
 
 class ConstraintStatus(bpy.types.Operator):
     """Disable/Enable bone constraints."""
+    bl_description = 'Disable/Enable bone constraints.'
     bl_idname = "object.expykit_set_constraints_status"
     bl_label = "Enable/disable constraints"
     bl_options = {'REGISTER', 'UNDO'}
@@ -220,6 +221,7 @@ class SelectConstrainedControls(bpy.types.Operator):
 
 class RevertDotBoneNames(bpy.types.Operator):
     """Reverts dots in bones that have renamed by Unreal Engine"""
+    bl_description = 'Reverts dots in bones that have renamed by Unreal Engine'
     bl_idname = "object.expykit_dot_bone_names"
     bl_label = "Revert dots in Names (from UE4 renaming)"
     bl_options = {'REGISTER', 'UNDO'}
@@ -258,6 +260,7 @@ class RevertDotBoneNames(bpy.types.Operator):
 
 class ConvertBoneNaming(bpy.types.Operator):
     """Convert Bone Names between Naming Convention"""
+    bl_description = 'Convert Bone Names between Naming Convention'
     bl_idname = "object.expykit_convert_bone_names"
     bl_label = "Convert Bone Names"
     bl_options = {'REGISTER', 'UNDO'}
@@ -469,6 +472,7 @@ def _offset_container_scale_update(self, context):
 
 class CreateTransformOffset(bpy.types.Operator):
     """Scale the Character and setup an Empty to preserve final transform"""
+    bl_description = 'Scale the Character and setup an Empty to preserve final transform'
     bl_idname = "object.expykit_create_offset"
     bl_label = "Create Scale Offset"
     bl_options = {'REGISTER', 'UNDO'}

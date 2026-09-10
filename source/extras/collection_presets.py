@@ -1317,6 +1317,7 @@ class SUB_PT_collection_presets(Panel):
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         props = context.scene.sub_collection_presets
         row = layout.row(align=True)
@@ -1346,7 +1347,7 @@ class SUB_PT_collection_presets(Panel):
         actions.operator("sub.collection_preset_save", text="Save New", icon='ADD')
         actions.operator("sub.collection_preset_update", text="Update", icon='FILE_TICK')
         actions = layout.row(align=True)
-        actions.scale_y = 1.3
+        actions.scale_y = 1.0
         actions.operator("sub.collection_preset_preview", text="Preview", icon='HIDE_OFF')
         actions.operator("sub.collection_preset_apply", text="Apply", icon='CHECKMARK')
         item = _active_item(context)
@@ -1386,6 +1387,10 @@ class SUB_PT_collection_presets(Panel):
         box.prop(props, "unmatched_behavior")
         if props.unmatched_behavior == 'MOVE':
             box.prop(props, "unmatched_collection")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 CLASSES = (

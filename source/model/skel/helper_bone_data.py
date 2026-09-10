@@ -16,9 +16,14 @@ class SUB_PT_helper_bone_data_master(Panel):
         return context.object.type == 'ARMATURE'
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         arma: bpy.types.Object = context.object
         shbd: SubHelperBoneData = arma.data.sub_helper_bone_data
         layout = self.layout
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_PT_helper_bone_data_aim_constraints(Panel):
     bl_label = "Aim Constraints"
@@ -35,6 +40,7 @@ class SUB_PT_helper_bone_data_aim_constraints(Panel):
         return context.object.type == 'ARMATURE'
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         arma: bpy.types.Object = context.object
         shbd: SubHelperBoneData = arma.data.sub_helper_bone_data
 
@@ -78,6 +84,10 @@ class SUB_PT_helper_bone_data_aim_constraints(Panel):
         row = layout.row()
         row.prop(active_entry, 'quat2')
 
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 class SUB_PT_helper_bone_data_orient_constraints(Panel):
     bl_label = "Orient Constraints"
     bl_space_type = 'PROPERTIES'
@@ -93,6 +103,7 @@ class SUB_PT_helper_bone_data_orient_constraints(Panel):
         return context.object.type == 'ARMATURE'
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         arma: bpy.types.Object = context.object
         shbd: SubHelperBoneData = arma.data.sub_helper_bone_data
 
@@ -136,6 +147,10 @@ class SUB_PT_helper_bone_data_orient_constraints(Panel):
         row = layout.row()
         row.prop(active_entry, 'range_max')
 
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
 
 class SUB_PT_helper_bone_data_version_info(Panel):
     bl_label = "Version Info Data"
@@ -152,6 +167,7 @@ class SUB_PT_helper_bone_data_version_info(Panel):
         return context.object.type == 'ARMATURE'
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         arma: bpy.types.Object = context.object
         shbd: SubHelperBoneData = arma.data.sub_helper_bone_data
 
@@ -160,6 +176,10 @@ class SUB_PT_helper_bone_data_version_info(Panel):
         row.prop(shbd, 'major_version')
         row = layout.row()
         row.prop(shbd, 'major_version')
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_UL_aim_constraints(UIList):
     def draw_item(self, _context, layout, _data, item, icon, active_data, _active_propname, index):
@@ -184,6 +204,7 @@ class SUB_UL_orient_constraints(UIList):
             layout.label(text="", icon_value=icon)
 
 class SUB_OP_orient_constraint_add(Operator):
+    bl_description = 'Add an orientation constraint to the helper bone data'
     bl_idname = 'sub.orient_constraint_add'
     bl_label = 'Add Orient Constraint'
 
@@ -198,6 +219,7 @@ class SUB_OP_orient_constraint_add(Operator):
         return {'FINISHED'} 
 
 class SUB_OP_orient_constraint_remove(Operator):
+    bl_description = 'Delete the selected helper bone orientation constraint'
     bl_idname = 'sub.orient_constraint_remove'
     bl_label = 'Remove Orient Constraint'
 
@@ -215,6 +237,7 @@ class SUB_OP_orient_constraint_remove(Operator):
         return {'FINISHED'} 
 
 class SUB_OP_aim_constraint_add(Operator):
+    bl_description = 'Add an aim constraint to the helper bone data'
     bl_idname = 'sub.aim_constraint_add'
     bl_label = 'Add Aim Constraint'
 
@@ -229,6 +252,7 @@ class SUB_OP_aim_constraint_add(Operator):
         return {'FINISHED'} 
 
 class SUB_OP_aim_constraint_remove(Operator):
+    bl_description = 'Delete the selected helper bone aim constraint'
     bl_idname = 'sub.aim_constraint_remove'
     bl_label = 'Remove Aim Constraint'
 
@@ -246,6 +270,7 @@ class SUB_OP_aim_constraint_remove(Operator):
         return {'FINISHED'} 
 
 class SUP_OP_helper_bone_constraints_remove(Operator):
+    bl_description = 'Remove Blender constraints generated from the helper bone data'
     bl_idname = 'sub.helper_bone_constraints_remove'
     bl_label = 'Remove Helper Bone constraints'
 
@@ -256,6 +281,7 @@ class SUP_OP_helper_bone_constraints_remove(Operator):
     
 
 class SUP_OP_helper_bone_constraints_refresh(Operator):
+    bl_description = 'Rebuild Blender constraints from the current helper bone data'
     bl_idname = 'sub.helper_bone_constraints_refresh'
     bl_label = 'Refresh Helper Bone constraints'
 

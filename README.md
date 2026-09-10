@@ -44,6 +44,14 @@ These are the pieces that are **not** in the main plugin, or are substantially d
 
 ### Animation importer and exporter
 
+Each panel has a small **?** in its header linking to its documentation. Hover
+over buttons for a description of their operation.
+
+The exporter can also read and update **motion_list.bin/.yml/.yaml** alongside
+animations, including cancel frames, blend frames, flags, and template-based new
+entries. See [Motion list integration](docs/motion-list.md) for detection rules,
+frame conventions, and backup behavior.
+
 ![Ultimate tab: model and animation importer](docs/readme/ultimate-tab.png)
 
 **Importer** (select the Smash armature or camera first):
@@ -133,6 +141,9 @@ The Timeline header includes FPS preset buttons. Their four values (and button v
 
 ### Model Tools
 
+**Magic Exo Skel Maker** is a collapsible section inside **Model Tools**. Its
+armature pairing and combined skeleton controls remain together there.
+
 ![Model Tools and the rest of the Ultimate tab](docs/readme/model-tools.png)
 
 - Limit Weights to 4
@@ -148,6 +159,23 @@ The Timeline header includes FPS preset buttons. Their four values (and button v
 Select an object with an Ultimate material, then use **Optimize Textures** in its material UI. Choose which assigned images to resize and how many times to halve each dimension; the dialog previews dimensions and total pixel reduction. Zero steps keeps the original size, and dimensions never fall below one pixel.
 
 Shared images are resized once and change in every material using them. Built-in defaults, linked images, unsupported image types, and unavailable data are skipped. Results support Undo and are packed into the file; **save the `.blend`** to keep them. Export textures afterward to write the resized `.nutexb` files.
+
+### Materials
+
+The Material Properties editor contains **Ultimate Material Data** and its
+shader parameter groups. Start with a shader label or convert a Blender
+material, then edit booleans, floats, vectors, textures, samplers, blend states,
+and rasterizer states in their respective sections. Use **Copy From Other
+Material** to reuse settings. **Material Re-Importer** reloads model materials
+from disk. Animated material values live in the armature's animation data.
+
+### Swing physics
+
+Use **Swing** to import or export swing physics data. Define chains with start
+and end bones, edit individual bone physics, and assign collision shapes to the
+chain's bones. The collision sections manage spheres, ovals, ellipsoids,
+capsules, planes, and connections. Bone and chain presets reuse physics values;
+inspect the mapping before applying a chain preset to a different skeleton.
 
 ### Armature Collection Presets
 
@@ -179,6 +207,9 @@ Opens from the Action Editor header, Ultimate Animation Data, or its own window.
 - Smash Viewport toggle/status (same engine as Render Properties)
 
 ### Retargeting
+
+The **Bind To** and **Expy Mapping** controls are embedded directly in
+**Retargeting**. Bone mapping groups remain collapsible beneath those controls.
 
 Expy Kit lives in the Ultimate tab (always listed; most operators want Pose Mode).
 

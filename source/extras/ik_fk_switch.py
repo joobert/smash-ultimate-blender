@@ -3,6 +3,7 @@ from bpy.props import BoolProperty
 
 class SUB_OP_simple_ik_control(bpy.types.Operator):
     """Simple IK control - just toggle IK constraints on/off"""
+    bl_description = 'Simple IK control - just toggle IK constraints on/off'
     bl_idname = "sub.simple_ik_control"
     bl_label = "Toggle IK Control"
     bl_options = {'REGISTER', 'UNDO'}

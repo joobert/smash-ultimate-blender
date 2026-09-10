@@ -8,6 +8,7 @@ from ..blender_compat import assign_bone_to_collection, ensure_bone_collection
 
 class SUB_OP_create_arm_ik_operator(bpy.types.Operator):
     """Generate Arm and Hand IK Bones with Constraints and Coloring"""
+    bl_description = 'Generate Arm and Hand IK Bones with Constraints and Coloring'
     bl_idname = "sub.create_arm_ik"
     bl_label = "Create Arm IK Bones"
     bl_options = {'REGISTER', 'UNDO'}
@@ -58,8 +59,13 @@ class SUB_PT_arm_ik_panel(bpy.types.Panel):
     bl_category = 'IK Bones'
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.operator("sub.create_arm_ik", text="Generate Arm IK Bones")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 def register():

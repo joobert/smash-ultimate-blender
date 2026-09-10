@@ -40,6 +40,7 @@ class SUB_PT_export_model(Panel):
 
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         ssp: SubSceneProperties = context.scene.sub_scene_properties
         layout = self.layout
         layout.use_property_split = False
@@ -115,6 +116,10 @@ class SUB_PT_export_model(Panel):
         layout.row().operator('sub.vanilla_nusktb_selector', icon='FILE', text='Re-Select Vanilla Nusktb')
 
         layout.row().operator('sub.model_exporter', icon='EXPORT', text='Export Model Files to a Folder')
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
     
 def vanilla_reference_sibling(filepath, target):
     """Keep the fighter, body folder and costume when switching reference types."""

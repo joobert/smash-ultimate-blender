@@ -14,6 +14,7 @@ class SUB_PT_attribute_renamer(Panel):
         return context.mode in modes
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
 
@@ -26,6 +27,10 @@ class SUB_PT_attribute_renamer(Panel):
         
         row = layout.row()
         row.operator("sub.rename_texture_to_material")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_OP_rename_mesh_attributes(Operator):

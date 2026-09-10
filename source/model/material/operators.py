@@ -4,6 +4,7 @@ from bpy.props import StringProperty
 from .load_from_shader_label import is_valid_shader_label, create_sub_matl_data_from_shader_label
 
 class SUB_OP_change_render_pass(Operator):
+    bl_description = 'Change which render pass draws the selected Smash material'
     bl_idname = 'sub.change_render_pass'
     bl_label = 'Change Render Pass'
 
@@ -11,6 +12,7 @@ class SUB_OP_change_render_pass(Operator):
         return {'FINISHED'} 
 
 class SUB_OP_create_sub_matl_data_from_shader_label(Operator):
+    bl_description = 'Create Smash material parameters for the specified shader label'
     bl_idname = 'sub.create_sub_matl_data_from_shader_label'
     bl_label = 'Create New Material from Shader Label'
     
@@ -45,6 +47,7 @@ class SUB_OP_create_sub_matl_data_from_shader_label(Operator):
         return wm.invoke_props_dialog(self)
 
 class SUB_OP_apply_material_preset(Operator):
+    bl_description = 'Apply a shader label preset to the selected Smash material'
     bl_idname = 'sub.change_shader_label'
     bl_label = 'Change Shader Label'
 
@@ -64,6 +67,7 @@ from .convert_smash_material import (
     armature_has_converted_smash_materials,
 )
 class SUB_OP_convert_blender_material(Operator):
+    bl_description = 'Convert the selected Blender material to Smash, generate a PRM texture, and reuse its normal map'
     bl_idname = 'sub.convert_blender_material'
     bl_label = 'Convert Blender Material (Creates PRM, uses existing normal)'
     bl_options = {'REGISTER', 'INTERNAL'}
@@ -103,6 +107,7 @@ class SUB_OP_convert_blender_material(Operator):
         return context.window_manager.invoke_props_dialog(self, width=300)
 
 class SUB_OP_convert_blender_material_no_textures(Operator):
+    bl_description = 'Convert the selected Blender material to Smash using only its diffuse texture'
     bl_idname = 'sub.convert_blender_material_no_textures'
     bl_label = 'Convert Blender Material (Diffuse only)'
 
@@ -114,6 +119,7 @@ class SUB_OP_convert_blender_material_no_textures(Operator):
         return {'FINISHED'} 
 
 class SUB_OP_set_texture_size(Operator):
+    bl_description = 'Set the texture dimensions used by material texture conversion'
     bl_idname = 'sub.set_texture_size'
     bl_label = 'Set Texture Size'
     bl_options = {'INTERNAL'}
@@ -138,6 +144,7 @@ class SUB_OP_set_texture_size(Operator):
         return {'FINISHED'}
 
 class SUB_OP_copy_from_ult_material(Operator):
+    bl_description = 'Copy Smash material parameters from another material'
     bl_idname = 'sub.copy_from_ult_material'
     bl_label = 'Copy From Other Material'
 

@@ -465,12 +465,13 @@ class SUB_PT_smash_export_doctor(Panel):
         return getattr(context.scene, 'sub_doctor', None) is not None
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
         state = context.scene.sub_doctor
 
         row = layout.row(align=True)
-        row.scale_y = 1.2
+        row.scale_y = 1.0
         row.operator(SUB_OP_doctor_run.bl_idname, icon='VIEWZOOM', text='Run Checks').scope = 'ALL'
         run_row = layout.row(align=True)
         run_row.operator(SUB_OP_doctor_run.bl_idname, text='Model Only').scope = 'MODEL'
@@ -520,7 +521,7 @@ class SUB_PT_smash_export_doctor(Panel):
 
         if safe_fixes:
             fix_row = layout.row()
-            fix_row.scale_y = 1.2
+            fix_row.scale_y = 1.0
             fix_row.operator(
                 SUB_OP_doctor_fix_safe.bl_idname,
                 icon='CHECKMARK',
@@ -571,6 +572,10 @@ class SUB_PT_smash_export_doctor(Panel):
         row.prop(state, 'block_on_errors')
         box.label(text='Only genuinely invalid output blocks an export.', icon='INFO')
         box.label(text='Wrong-looking but valid output is reported and lets you through.')
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 def _wrap(text, width):

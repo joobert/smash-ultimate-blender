@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
 # Bone override list items used to filter which bones receive transform flags
 class SUB_PG_bone_override_item(bpy.types.PropertyGroup):
-    name: StringProperty(name="Bone Name")
+    name: StringProperty(name="Bone Name", description='Bone included in the transform override filter')
 
 class SUB_UL_bone_override_list(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
@@ -127,7 +127,8 @@ class SUB_OP_populate_override_from_armature(Operator):
     bl_idname = 'sub.populate_override_from_armature'
     bl_label = 'Populate From Armature'
     bl_description = 'Fill the override list with all bones from the active armature'
-    clear_existing: BoolProperty(name='Clear Existing', default=True)
+    clear_existing: BoolProperty(name='Clear Existing', default=True,
+        description='Replace the current override list instead of adding to it')
 
     def execute(self, context):
         ssp = context.scene.sub_scene_properties
@@ -189,9 +190,9 @@ class SUB_OP_apply_override_preset_thrown(Operator):
 
 # Action item for the batch export list
 class SUB_PG_anim_action_item(bpy.types.PropertyGroup):
-    name: StringProperty(name="Name")
-    action: PointerProperty(type=bpy.types.Action)
-    export: BoolProperty(name="Export", default=True)
+    name: StringProperty(name="Name", description='Animation filename used for this batch export entry')
+    action: PointerProperty(type=bpy.types.Action, description='Blender action to sample for this animation')
+    export: BoolProperty(name="Export", default=True, description='Include this animation in the next batch export')
 
 # UI List for displaying available actions
 class SUB_UL_action_export_list(UIList):
@@ -269,6 +270,7 @@ class SUB_PT_export_anim(Panel):
         return False
     
     def draw(self, context: bpy.types.Context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
         
@@ -318,7 +320,7 @@ class SUB_PT_export_anim(Panel):
                     
                     # Batch export button
                     row = box.row()
-                    row.scale_y = 1.2
+                    row.scale_y = 1.0
                     selected_count = sum(1 for item in ssp.action_export_list if item.export)
                     row.operator(
                         SUB_OP_batch_export_anim.bl_idname,
@@ -327,6 +329,10 @@ class SUB_PT_export_anim(Panel):
                     )
         else:
             row.label(text=f'The selected {obj.type.lower()} is not an armature or a camera.')
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 class SUB_OP_refresh_actions(Operator):
     bl_idname = 'sub.refresh_actions'
@@ -541,7 +547,7 @@ class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
         default=True,
     )
     
-    directory: StringProperty(subtype="DIR_PATH")
+    directory: StringProperty(subtype="DIR_PATH", description='Destination folder for exported animations and the starting point for motion-list detection')
     
     @classmethod
     def poll(cls, context):
@@ -580,6 +586,8 @@ class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
     
     def draw(self, context):
         layout = self.layout
+        from .motion_list_ui import draw_settings
+        draw_settings(layout, context)
         layout.prop(self, "include_transform_track")
         layout.prop(self, "include_material_track")
         layout.prop(self, "include_visibility_track")
@@ -738,7 +746,7 @@ class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
         end_time = time.perf_counter()
         self.report({'INFO'}, f"Successfully exported {export_count}/{total_count} animations in {end_time - start_time:.2f} seconds")
         
-        return {'FINISHED'}
+        return {'FINISHED'} if export_count == total_count else {'CANCELLED'}
 
 # Add this function to sanitize filenames - place it before the SUB_OP_anim_export class
 def sanitize_filename(filename):
@@ -1011,6 +1019,8 @@ class SUB_OP_anim_export(AnimationExportJob, Operator):
 
     def draw(self, context):
         layout = self.layout
+        from .motion_list_ui import draw_settings
+        draw_settings(layout, context)
         layout.prop(self, "include_transform_track")
         layout.prop(self, "include_material_track")
         layout.prop(self, "include_visibility_track")
@@ -1229,6 +1239,19 @@ def transform_group_fix_floating_point_inaccuracies(trans_group: ssbh_data_py.an
                     track.values[current_transform_index].translation[i] = first_transform.translation[i]
 
 def save_ssbh_anim_data(ssbh_anim_data, filepath, operator=None):
+    """Validate optional motion edits before export, then commit after saving."""
+    from .motion_list_ui import prepare, commit
+    settings = getattr(bpy.context.scene, 'sub_motion_list', None)
+    prepared = prepare(settings, filepath, ssbh_anim_data.final_frame_index) if settings else None
+    saved_path = _save_ssbh_anim_data(ssbh_anim_data, filepath, operator)
+    if os.path.abspath(saved_path) == os.path.abspath(filepath):
+        commit(prepared, operator)
+    elif prepared is not None and operator is not None:
+        operator.report({'WARNING'}, 'Motion list unchanged because animation was saved under an alternate filename')
+    return saved_path
+
+
+def _save_ssbh_anim_data(ssbh_anim_data, filepath, operator=None):
     """Write a .nuanmb, recovering from Windows file locks when possible."""
     filepath = os.path.abspath(os.fspath(filepath))
     directory = os.path.dirname(filepath)

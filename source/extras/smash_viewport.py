@@ -5192,6 +5192,7 @@ class RENDER_PT_smash_viewport(bpy.types.Panel):
         return getattr(context, "engine", "") in cls.COMPAT_ENGINES
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         ssp = getattr(context.scene, "sub_scene_properties", None)
         if ssp is None:
@@ -5246,6 +5247,10 @@ class RENDER_PT_smash_viewport(bpy.types.Panel):
             text="Relink Smash Model Folder",
             icon="FILEBROWSER",
         )
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 class SUB_RenderEngine_smash_viewport(bpy.types.RenderEngine):

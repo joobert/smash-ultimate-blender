@@ -8,7 +8,7 @@ ADDON_MODULE_NAME = (__package__ or "").split(".")[0]
 
 
 class SUB_PG_param_labels_path(PropertyGroup):
-    name: StringProperty(name="Label", default="")
+    name: StringProperty(name="Label", default="", description='Display name for this additional parameter-label file')
     path: StringProperty(
         name="Path",
         description="An additional ParamLabels CSV file that receives generated hashes",
@@ -18,11 +18,14 @@ class SUB_PG_param_labels_path(PropertyGroup):
 
 
 class SUB_PG_model_export_path(PropertyGroup):
-    model_folder: StringProperty(name="Model Source Folder", subtype='DIR_PATH')
-    export_folder: StringProperty(name="Export Folder", subtype='DIR_PATH')
+    model_folder: StringProperty(name="Model Source Folder", subtype='DIR_PATH',
+        description='Imported model folder associated with this export destination')
+    export_folder: StringProperty(name="Export Folder", subtype='DIR_PATH',
+        description='Destination used when exporting models imported from the associated source folder')
 
 
 class SUB_OP_model_export_path(bpy.types.Operator):
+    bl_description = 'Choose the destination folders used by the model exporter'
     bl_idname = 'sub.model_export_path'
     bl_label = 'Edit Model Export Folders'
     index: IntProperty(default=-1)
@@ -44,8 +47,10 @@ class SUB_OP_model_export_path(bpy.types.Operator):
 class SUB_AddonPreferences(AddonPreferences):
     bl_idname = ADDON_MODULE_NAME
 
-    default_vanilla_nusktb_folder: StringProperty(name="Default Vanilla .nusktb Folder", subtype='DIR_PATH')
-    default_model_export_folder: StringProperty(name="Default Model Export Folder", subtype='DIR_PATH')
+    default_vanilla_nusktb_folder: StringProperty(name="Default Vanilla .nusktb Folder", subtype='DIR_PATH',
+        description='Initial folder when browsing for an original game skeleton reference')
+    default_model_export_folder: StringProperty(name="Default Model Export Folder", subtype='DIR_PATH',
+        description='Initial model export destination when no per-model folder is configured')
     model_export_paths: CollectionProperty(type=SUB_PG_model_export_path)
 
     param_labels_paths: CollectionProperty(type=SUB_PG_param_labels_path)
@@ -56,10 +61,10 @@ class SUB_AddonPreferences(AddonPreferences):
         description="Show the configurable FPS buttons in the Timeline header",
         default=True,
     )
-    fps_preset_1: IntProperty(name="FPS 1", default=5, min=1, max=1000)
-    fps_preset_2: IntProperty(name="FPS 2", default=15, min=1, max=1000)
-    fps_preset_3: IntProperty(name="FPS 3", default=30, min=1, max=1000)
-    fps_preset_4: IntProperty(name="FPS 4", default=60, min=1, max=1000)
+    fps_preset_1: IntProperty(name="FPS 1", default=5, min=1, max=1000, description='Playback frame rate assigned to the first timeline shortcut')
+    fps_preset_2: IntProperty(name="FPS 2", default=15, min=1, max=1000, description='Playback frame rate assigned to the second timeline shortcut')
+    fps_preset_3: IntProperty(name="FPS 3", default=30, min=1, max=1000, description='Playback frame rate assigned to the third timeline shortcut')
+    fps_preset_4: IntProperty(name="FPS 4", default=60, min=1, max=1000, description='Playback frame rate assigned to the fourth timeline shortcut')
 
     show_nuanmb_extension_on_import: BoolProperty(
         name=".nuanmb",

@@ -17,6 +17,7 @@ class SUB_PT_ik_animation_tools(Panel):
         return context.mode in modes
 
     def draw(self, context):
+        self.layout.use_property_decorate = False
         layout = self.layout
         layout.use_property_split = False
 
@@ -25,7 +26,7 @@ class SUB_PT_ik_animation_tools(Panel):
         box.label(text="Pose Controls", icon="CONSTRAINT_BONE")
 
         row = box.row(align=True)
-        row.scale_y = 1.2
+        row.scale_y = 1.0
         if hasattr(bpy.types, 'SUB_OP_quick_switch_ik_fk'):
             row.operator("sub.quick_switch_ik_fk", text="Switch IK/FK", icon="ARROW_LEFTRIGHT")
 
@@ -62,6 +63,10 @@ class SUB_PT_ik_animation_tools(Panel):
 
         col = box.column(align=True)
         col.operator("sub.apply_ik_animation", text="Bake & Remove IK/FK", icon="RENDER_ANIMATION")
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
 
 # Property to store panel expansion state

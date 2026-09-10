@@ -589,6 +589,7 @@ def apply_guided_answer(context, step, answer, report=None):
 
 class ULTIMATE_OT_guided_info(bpy.types.Operator):
     """Show a Guided Mode explanation dialog."""
+    bl_description = 'Show a Guided Mode explanation dialog.'
     bl_idname = "object.ultimate_guided_info"
     bl_label = "Guided Mode"
     bl_options = {'INTERNAL'}
@@ -609,6 +610,7 @@ class ULTIMATE_OT_guided_info(bpy.types.Operator):
 
 class ULTIMATE_OT_guided_answer(bpy.types.Operator):
     """Yes or No answer for a Guided Mode prompt."""
+    bl_description = 'Yes or No answer for a Guided Mode prompt.'
     bl_idname = "object.ultimate_guided_answer"
     bl_label = "Guided Mode"
     bl_options = {'INTERNAL'}
@@ -705,6 +707,7 @@ def guided_button_label(scene):
 
 class ULTIMATE_OT_apply_bind_settings(bpy.types.Operator):
     """Re-apply the Bind to Active Armature settings to the last bound pair."""
+    bl_description = 'Re-apply the Bind to Active Armature settings to the last bound pair.'
     bl_idname = "object.ultimate_apply_bind_settings"
     bl_label = "Apply Bind Settings"
     bl_options = {'REGISTER', 'UNDO'}
@@ -724,6 +727,7 @@ class ULTIMATE_OT_apply_bind_settings(bpy.types.Operator):
 
 class ULTIMATE_OT_bind_wait_select(bpy.types.Operator):
     """After the bind popup, leave only the constrained armature selected."""
+    bl_description = 'After the bind popup, leave only the constrained armature selected.'
     bl_idname = "object.ultimate_bind_wait_select"
     bl_label = "Bind Finish Select"
     bl_options = {'INTERNAL'}
