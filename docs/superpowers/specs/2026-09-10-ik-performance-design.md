@@ -186,3 +186,91 @@ order, each profiled before being touched:
 4. `clean_animation` in `ik_channels.py`, unprofiled. Measure first.
 
 Anything measured and found not worth changing is reported as such.
+
+## Outcome
+
+Measured on Blender 4.5.7, the c40 Smash rig (89 bones), a 156-frame clip
+for IK creation and a 371-frame clip for import and bake. Median of
+three runs.
+
+| Phase | Before | After | Change |
+| --- | --- | --- | --- |
+| Create IK (dialog OK) | 4.52s | 3.04s | 1.5x |
+| Import animation, IK active | 40.87s | 6.99s | 5.8x |
+| Bake and Remove IK | 20.46s | 0.71s | 28.8x |
+| Whole cycle | 66.06s | 10.70s | 6.2x |
+| Finger slider bake (157 frames) | 1.42s | 0.27s | 5.2x |
+
+### The pole angle was not replaced
+
+The design called for replacing the golden-section pole angle search with
+a closed form. That was implemented, measured, and reverted.
+
+The objective looked analytically solvable. Changing the pole angle
+should rotate the solved chain rigidly about the root-to-target axis,
+which makes the squared distance to the sampled pose exactly
+C + A*cos(t) + B*sin(t), and three samples pin that down. The closed
+form does find angles that score *lower* on that objective than the
+search does. It also drifts the end effector further from the FK pose:
+worst-case limb error went from 0.415 to 0.622 and the median from 0.039
+to 0.049. Clamping the closed form to the same bracket the search used
+did not recover it.
+
+The likely cause is that Blender's IK solver warm-starts from the
+previous evaluation, so the residual depends on the path taken through
+angles rather than only on the angle. That makes a small-step local
+search meaningful and a three-probe fit not.
+
+Cutting the iteration count was measured separately: 10 or 12 steps are
+indistinguishable from 18 on the benchmark clip, and even 3 steps stays
+within noise. That is single-clip evidence about output quality for a
+saving well under a second, so it was not taken either.
+
+The search therefore still costs about 25 evaluations per chain per
+frame, and it is now the great majority of what a match costs. Every
+speedup above comes from removing work around it.
+
+### Fidelity is approximate, and was already
+
+Matching IK to FK does not reproduce the FK animation exactly on this
+rig: median limb error 0.039, worst 0.415, on the arm chains in
+particular. Two-bone IK solves the shoulder rather than copying it, so
+some poses are not reachable. This is pre-existing and unchanged --
+before and after agree to five decimal places across the whole
+distribution -- but it is worth knowing about independently of
+performance. tests/test_ik_match_fidelity_blender.py asserts against
+these measured values.
+
+### Bugs found on the way
+
+Both predate this work and both break on Blender 4.4/4.5, the add-on's
+stated minimum.
+
+`Action.fcurve_ensure_for_datablock` exists on Blender 4.x but takes no
+`group_name`, so passing one raised TypeError. That broke raw animation
+import and the Bake Visible retarget path.
+
+`set_finger_slider_mode` assigned `PoseBone.select`, which only exists on
+Blender 5. Finger sliders could not be built or toggled at all.
+
+### Hot spots measured and left alone
+
+Material and visibility import: the whole of `import_model_anim` is 0.31s
+of a 7.0s import, so its per-frame `keyframe_insert` calls are not worth
+restructuring.
+
+`eye_rig.bake_eye_look_keys`: dominated by the per-frame `frame_set` it
+needs to read the posed control, with roughly 0.1s of keyframe overhead
+to win.
+
+`fk_to_ik._execute_transfer_body`: unreachable. `_execute_transfer`
+routes to `ik_channels.match` unconditionally.
+
+`clean_animation`: only runs behind the "Clean animation" checkbox, and
+is pure Python over F-curves with no depsgraph work.
+
+### Subprocess workers
+
+Not built, as the design said. The remaining per-phase times are below
+the several-second floor of saving the file and launching worker
+Blenders, so workers would make these operations slower.
