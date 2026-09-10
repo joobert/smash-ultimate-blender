@@ -461,6 +461,15 @@ class SUB_PT_model_tools(Panel):
         help_box.label(text="Matches bone names exactly (case-sensitive).", icon="INFO")
         help_box.label(text="Only roll values are changed.")
 
+        header, body = layout.panel('sub_model_exo_skel', default_closed=True)
+        header.label(text='Magic Exo Skel Maker', icon='ARMATURE_DATA')
+        if body is not None:
+            if context.mode in {'OBJECT', 'EDIT_ARMATURE', 'POSE'}:
+                from ..exo.magic_exo_skel import draw_exo_skel
+                draw_exo_skel(body, context)
+            else:
+                body.label(text='Switch to Object, Pose, or Armature Edit Mode.', icon='INFO')
+
     def draw_header_preset(self, context):
         from ..ui_help import draw_panel_help
         draw_panel_help(self.layout, self)

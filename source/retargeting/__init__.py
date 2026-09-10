@@ -1220,6 +1220,7 @@ class SUB_PT_retargeting_main(Panel):
         draw_bind_controls(layout, context)
         layout.separator()
         draw_mapping_controls(layout, context)
+        draw_bone_mapping_sections(layout, context)
 
     def draw_header_preset(self, context):
         from ..ui_help import draw_panel_help
@@ -1269,6 +1270,32 @@ def draw_bind_controls(layout, context):
         row = layout.row()
         row.scale_y = 1.0
         row.operator("object.ultimate_apply_bind_settings", icon='FILE_REFRESH')
+
+
+class _MappingLayout(ui.RetargetBasePanel):
+    """Reuse Expy's drawing helpers without registering another Blender panel."""
+    def __init__(self, layout):
+        self.layout = layout
+
+
+def draw_bone_mapping_sections(layout, context):
+    obj = context.object
+    if not obj or obj.type != 'ARMATURE' or not hasattr(obj.data, 'expykit_retarget'):
+        layout.label(text='Select an armature to edit bone mappings.', icon='INFO')
+        return
+    sections = (
+        ('custom', 'Custom Bones', ui.VIEW3D_PT_expy_retarget_custom),
+        ('core', 'Core', ui.VIEW3D_PT_expy_retarget_spine),
+        ('arms', 'Arms', ui.VIEW3D_PT_expy_retarget_arms),
+        ('legs', 'Legs', ui.VIEW3D_PT_expy_retarget_leg),
+        ('fingers', 'Fingers', ui.VIEW3D_PT_expy_retarget_fingers),
+        ('root', 'Root', ui.VIEW3D_PT_expy_retarget_root),
+    )
+    for section_id, label, drawing in sections:
+        header, body = layout.panel('sub_retarget_mapping_' + section_id, default_closed=True)
+        header.label(text=label)
+        if body is not None:
+            drawing.draw(_MappingLayout(body), context)
 
 
 class ULTIMATE_PT_ActionsPanel(Panel):
@@ -1654,156 +1681,9 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
         guided._invalidate_smash_viewport()
 
 
-class ULTIMATE_PT_retarget_spine(ui.VIEW3D_PT_expy_retarget_spine):
-    """Core panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        # Always show the panel
-        return True
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_arms(ui.VIEW3D_PT_expy_retarget_arms):
-    """Arms panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        # Always show the panel
-        return True
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_arms_IK(ui.VIEW3D_PT_expy_retarget_arms_IK):
-    """Arms IK panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        return False
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_legs(ui.VIEW3D_PT_expy_retarget_leg):
-    """Legs panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        return True
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_legs_IK(ui.VIEW3D_PT_expy_retarget_leg_IK):
-    """Legs IK panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        return False
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_fingers(ui.VIEW3D_PT_expy_retarget_fingers):
-    """Fingers panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        return True
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_face(ui.VIEW3D_PT_expy_retarget_face):
-    """Face panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        return False
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_root(ui.VIEW3D_PT_expy_retarget_root):
-    """Root panel in Ultimate tab"""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        return True
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
-class ULTIMATE_PT_retarget_custom(ui.VIEW3D_PT_expy_retarget_custom):
-    """Custom bone mappings under the main Retargeting controls."""
-    bl_category = 'Ultimate'
-    bl_parent_id = "SUB_PT_retargeting_main"
-    
-    @classmethod
-    def poll(cls, context):
-        # Always show the panel
-        return True
-    
-    def draw(self, context):
-        self.layout.use_property_decorate = False
-        # Call parent draw method
-        super().draw(context)
-        # Force UI refresh to update custom bones list immediately
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
-
-
 # List of custom panels to register (all in Ultimate tab under Retargeting)
 custom_panels = [
     SUB_PT_retargeting_main,
-    ULTIMATE_PT_retarget_custom,  # Custom mappings follow the main controls
-    ULTIMATE_PT_retarget_spine,
-    ULTIMATE_PT_retarget_arms,
-    ULTIMATE_PT_retarget_arms_IK,
-    ULTIMATE_PT_retarget_legs,
-    ULTIMATE_PT_retarget_legs_IK,
-    ULTIMATE_PT_retarget_fingers,
-    ULTIMATE_PT_retarget_face,
-    ULTIMATE_PT_retarget_root,
     ULTIMATE_PT_ActionsPanel,  # Actions panel
     ULTIMATE_PT_ActionsBinding,  # Binding sub-panel
     ULTIMATE_PT_ActionsConversion,  # Conversion sub-panel (actions)

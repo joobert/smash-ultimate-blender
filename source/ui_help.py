@@ -1,6 +1,34 @@
 """Shared panel documentation links; keep destinations in step with README."""
 DOCS_ROOT = 'https://github.com/joobert/smash-ultimate-blender/blob/animation-workflow/'
 
+# Retired panel types can survive an add-on reload or third-party tab reordering.
+# Their controls now live inside the parents' draw functions.
+RETIRED_PANEL_IDS = (
+    'ULTIMATE_PT_retarget_custom', 'ULTIMATE_PT_retarget_spine',
+    'ULTIMATE_PT_retarget_arms', 'ULTIMATE_PT_retarget_arms_IK',
+    'ULTIMATE_PT_retarget_legs', 'ULTIMATE_PT_retarget_legs_IK',
+    'ULTIMATE_PT_retarget_fingers', 'ULTIMATE_PT_retarget_face',
+    'ULTIMATE_PT_retarget_root', 'ULTIMATE_PT_expy_retarget',
+    'ULTIMATE_PT_BindPanel', 'ULTIMATE_PT_BindSettings',
+    'SUB_PT_ultimate_exo_skel',
+)
+
+
+def merged_panel_id(identifier):
+    if identifier == 'SUB_PT_ultimate_exo_skel':
+        return 'SUB_PT_model_tools'
+    if identifier in RETIRED_PANEL_IDS:
+        return 'SUB_PT_retargeting_main'
+    return identifier
+
+
+def unregister_retired_panels():
+    import bpy
+    for identifier in RETIRED_PANEL_IDS:
+        cls = bpy.types.Panel.bl_rna_get_subclass_py(identifier)
+        if cls is not None:
+            bpy.utils.unregister_class(cls)
+
 
 def panel_doc_path(panel):
     module = type(panel).__module__

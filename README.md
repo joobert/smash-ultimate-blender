@@ -209,7 +209,8 @@ Opens from the Action Editor header, Ultimate Animation Data, or its own window.
 ### Retargeting
 
 The **Bind To** and **Expy Mapping** controls are embedded directly in
-**Retargeting**. Bone mapping groups remain collapsible beneath those controls.
+**Retargeting**. Custom Bones, Core, Arms, Legs, Fingers, and Root are dropdown
+sections inside that same panel, so they stay together when the sidebar is reordered.
 
 Expy Kit lives in the Ultimate tab (always listed; most operators want Pose Mode).
 

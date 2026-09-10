@@ -334,114 +334,98 @@ class SUB_UL_BoneList(UIList):
             layout.prop_search(item, 'bone_name_smash', context.scene.sub_scene_properties, 'pairable_bone_list', text='', icon='BONE_DATA')
 
 
-class SUB_PT_ultimate_exo_skel(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = 'Ultimate'
-    bl_label = 'Magic Exo Skel Maker'
-    bl_parent_id = 'SUB_PT_model_tools'
-    bl_options = {'DEFAULT_CLOSED'}
-    
-    @classmethod
-    def poll(cls, context):
-        return context.mode in {'OBJECT', 'EDIT_ARMATURE', 'POSE'}
-    
-    def draw(self, context):
-        self.layout.use_property_decorate = False
-        ssp: SubSceneProperties = context.scene.sub_scene_properties
-        layout = self.layout
-        layout.use_property_split = False
-        
-        # Original panel content - Select armatures section
-        row = layout.row(align=True)
-        row.label(text='Select the armatures')
-        
-        row = layout.row(align=True)
-        row.prop(ssp, 'smash_armature', icon='ARMATURE_DATA')
-        
-        row = layout.row(align=True)
-        row.prop(ssp, 'other_armature', icon='ARMATURE_DATA')
-        
-        row = layout.row(align=True)
-        row.prop(ssp, 'armature_prefix')
-        
-        if ssp.other_armature is not None:
-            row = layout.row(align=True)
-            row.operator(SUB_OP_rename_other_bones.bl_idname)
-        
-        # Add Single Exo Constraint button - always visible
-        layout.separator()
-        box = layout.box()
-        box.label(text="Single Exo Bone Tools")
-        row = box.row(align=True)
-        row.operator("sub.add_single_exo_constraint", text="Add Single Exo Constraint")
-        
-        # Bone list section
-        if not ssp.bone_list:
-            row = layout.row(align=True)
-            row.operator(SUB_OP_build_bone_list.bl_idname)
-            
-            # Smart un-exo model section - Always visible
-            layout.separator()
-            box = layout.box()
-            box.label(text="Smart un-exo model (for movesets)")
-            
-            # Add explanatory text
-            row = box.row(align=True)
-            row.label(text="This process is primarily meant for movesets, not skins")
-            
-            # Cleanup Unused Exo Bones button (at the top)
-            row = box.row(align=True)
-            row.operator("sub.cleanup_unused_exo_bones", text="Cleanup Unused Exo Bones")
-            
-            # Transfer Exo Weights button (moved up)
-            row = box.row(align=True)
-            row.operator("sub.transfer_exo_weights", text="Transfer Exo Weights")
-            
-            # Align Smash Bones to Exo Bones button (moved down)
-            row = box.row(align=True)
-            row.operator("sub.align_exo_bones", text="Align Smash Bones to Exo Bones")
-            
-            return
-        
-        row = layout.row(align=True)
-        row.operator(SUB_OP_build_bone_list.bl_idname, text='Rebuild Bone List')
-        
-        row = layout.row(align=True)
-        row.operator(SUB_OP_populate_bone_list.bl_idname)
+def draw_exo_skel(layout, context):
+    """Draw Exo Skel tools inside Model Tools; no separate Panel type."""
+    layout.use_property_decorate = False
+    ssp: SubSceneProperties = context.scene.sub_scene_properties
+    layout.use_property_split = False
 
+    # Original panel content - Select armatures section
+    row = layout.row(align=True)
+    row.label(text='Select the armatures')
+
+    row = layout.row(align=True)
+    row.prop(ssp, 'smash_armature', icon='ARMATURE_DATA')
+
+    row = layout.row(align=True)
+    row.prop(ssp, 'other_armature', icon='ARMATURE_DATA')
+
+    row = layout.row(align=True)
+    row.prop(ssp, 'armature_prefix')
+
+    if ssp.other_armature is not None:
         row = layout.row(align=True)
-        row.operator(SUB_OP_update_bone_list.bl_idname)
-        
-        layout.separator()
-        
+        row.operator(SUB_OP_rename_other_bones.bl_idname)
+
+    # Add Single Exo Constraint button - always visible
+    layout.separator()
+    box = layout.box()
+    box.label(text="Single Exo Bone Tools")
+    row = box.row(align=True)
+    row.operator("sub.add_single_exo_constraint", text="Add Single Exo Constraint")
+
+    # Bone list section
+    if not ssp.bone_list:
         row = layout.row(align=True)
-        row.template_list('SUB_UL_BoneList', 'Bone List', ssp, 'bone_list', ssp, 'bone_list_index', rows=1, maxrows=10)
-    
-        row = layout.row(align=True)
-        row.operator(SUB_OP_make_combined_skeleton.bl_idname, text='Make New Combined Skeleton')
-        
-        # Smart un-exo model section is duplicated here for when a bone list exists
+        row.operator(SUB_OP_build_bone_list.bl_idname)
+
+        # Smart un-exo model section - Always visible
         layout.separator()
         box = layout.box()
         box.label(text="Smart un-exo model (for movesets)")
-        
+
         # Add explanatory text
         row = box.row(align=True)
         row.label(text="This process is primarily meant for movesets, not skins")
-        
+
         # Cleanup Unused Exo Bones button (at the top)
         row = box.row(align=True)
         row.operator("sub.cleanup_unused_exo_bones", text="Cleanup Unused Exo Bones")
-        
+
         # Transfer Exo Weights button (moved up)
         row = box.row(align=True)
         row.operator("sub.transfer_exo_weights", text="Transfer Exo Weights")
-        
+
         # Align Smash Bones to Exo Bones button (moved down)
         row = box.row(align=True)
         row.operator("sub.align_exo_bones", text="Align Smash Bones to Exo Bones")
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
+        return
+
+    row = layout.row(align=True)
+    row.operator(SUB_OP_build_bone_list.bl_idname, text='Rebuild Bone List')
+
+    row = layout.row(align=True)
+    row.operator(SUB_OP_populate_bone_list.bl_idname)
+
+    row = layout.row(align=True)
+    row.operator(SUB_OP_update_bone_list.bl_idname)
+
+    layout.separator()
+
+    row = layout.row(align=True)
+    row.template_list('SUB_UL_BoneList', 'Bone List', ssp, 'bone_list', ssp, 'bone_list_index', rows=1, maxrows=10)
+
+    row = layout.row(align=True)
+    row.operator(SUB_OP_make_combined_skeleton.bl_idname, text='Make New Combined Skeleton')
+
+    # Smart un-exo model section is duplicated here for when a bone list exists
+    layout.separator()
+    box = layout.box()
+    box.label(text="Smart un-exo model (for movesets)")
+
+    # Add explanatory text
+    row = box.row(align=True)
+    row.label(text="This process is primarily meant for movesets, not skins")
+
+    # Cleanup Unused Exo Bones button (at the top)
+    row = box.row(align=True)
+    row.operator("sub.cleanup_unused_exo_bones", text="Cleanup Unused Exo Bones")
+
+    # Transfer Exo Weights button (moved up)
+    row = box.row(align=True)
+    row.operator("sub.transfer_exo_weights", text="Transfer Exo Weights")
+
+    # Align Smash Bones to Exo Bones button (moved down)
+    row = box.row(align=True)
+    row.operator("sub.align_exo_bones", text="Align Smash Bones to Exo Bones")

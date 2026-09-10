@@ -29,7 +29,6 @@ classes = [
     source.exo.magic_exo_skel.SUB_OP_populate_bone_list,
     source.exo.magic_exo_skel.SUB_OP_update_bone_list,
     source.exo.magic_exo_skel.SUB_OP_rename_other_bones,
-    source.exo.magic_exo_skel.SUB_PT_ultimate_exo_skel,
     source.exo.magic_exo_skel.BoneListItem,
     source.exo.magic_exo_skel.PairableBoneListItem,
     source.exo.magic_exo_skel.SUB_UL_BoneList,

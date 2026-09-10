@@ -23,6 +23,9 @@ def register():
 
     check_unsupported_blender_versions()
 
+    from .source.ui_help import unregister_retired_panels
+    unregister_retired_panels()
+
     # Preferences are needed by ParamLabels and Timeline tools.
     from .source import addon_preferences
     addon_preferences.register()
