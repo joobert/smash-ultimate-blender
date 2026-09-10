@@ -9,6 +9,7 @@ identical scene state.
 """
 from pathlib import Path
 import importlib
+import os
 import tempfile
 
 fixture = Path(__file__).with_name('test_addon_registration_blender.py')
@@ -18,7 +19,11 @@ finger_sliders = importlib.import_module(MODULE + '.source.extras.finger_sliders
 pose_math = importlib.import_module(MODULE + '.source.extras.pose_math')
 fcurve_compat = importlib.import_module(MODULE + '.source.anim.fcurve_compat')
 
-BASELINE = ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'
+# Per-Blender-version baselines are kept in separate directories, since a
+# .blend written by a newer Blender should not be fed to an older one.
+BASELINE = Path(os.environ.get(
+    'SUB_BASELINE_BLEND',
+    ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'))
 TOLERANCE = 1e-4
 
 if not BASELINE.exists():

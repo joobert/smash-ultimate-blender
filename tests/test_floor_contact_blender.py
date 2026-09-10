@@ -8,7 +8,13 @@ import tempfile
 import types
 
 import bpy
-from bpy_restrict_state import RestrictBlend
+try:
+    from bpy_restrict_state import RestrictBlend
+except ImportError:
+    # Blender 5 dropped bpy_restrict_state. It was only used here to register
+    # under the same restricted context an add-on sees at load time; without
+    # the module there is nothing to restrict, so a plain no-op stands in.
+    from contextlib import nullcontext as RestrictBlend
 from mathutils import Matrix, Vector
 
 ROOT = Path(__file__).resolve().parents[1]

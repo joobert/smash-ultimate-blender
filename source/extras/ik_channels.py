@@ -460,6 +460,16 @@ def _evaluate_match_steps(context, steps, batch):
 # Residual at or below which the solved chain is treated as matching the
 # sampled FK pose. Same threshold the refinement already used to stop.
 _POLE_TOLERANCE = 1e-9
+# Golden-section iterations used to refine the pole angle. See the note in
+# _match_chain_steps for why the search is kept at all.
+#
+# Was 18. Swept over six varied clips (.tests/benchmarks/ik_apply/pole_sweep.py):
+# at 12 the median limb error moves by nothing measurable on any clip and the
+# worst frame is identical to five decimals, while the match runs 1.18x faster.
+# Below 12 small regressions start appearing -- 0.5% of the median at 10, 3.6%
+# at 4 -- so 12 is where the search has genuinely converged rather than where
+# the trade merely still looks acceptable.
+_POLE_REFINE_STEPS = 12
 
 
 def _chain_cache(obj, jobs):
@@ -589,8 +599,8 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
     # axial twist and near-straight chains where a position-only pole test has
     # almost no useful signal.
     #
-    # This search is deliberately left alone, and it is the bulk of what a
-    # match still costs -- about 25 of its evaluations per chain per frame.
+    # This search is the bulk of what a match still costs -- about 18 of its
+    # evaluations per chain per frame -- but it is kept.
     #
     # Its objective looks analytically solvable: changing the pole angle
     # should rotate the solved chain rigidly about the root-to-target axis,
@@ -604,18 +614,17 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
     # path taken through angles, not just the angle -- which makes a
     # small-step local search meaningful and a three-probe fit not.
     #
-    # Cutting the iteration count was measured too: 10 or 12 steps are
-    # indistinguishable from 18 on the benchmark clip. That is single-clip
-    # evidence about output quality for a saving of well under a second, so
-    # it was not taken. The speedups in this module come from not evaluating
-    # the *placement*, which is exact arithmetic.
+    # The iteration count *was* cut, from 18 to 12, once there was multi-clip
+    # evidence for it -- see _POLE_REFINE_STEPS. The rest of the speedups in
+    # this module come from not evaluating the *placement*, which is exact
+    # arithmetic.
     if (yield from error(angle)) > _POLE_TOLERANCE:
         lo, hi = angle - .2, angle + .2
         ratio = (math.sqrt(5.0)-1.0)*.5
         a, b = hi-ratio*(hi-lo), lo+ratio*(hi-lo)
         fa = yield from error(a)
         fb = yield from error(b)
-        for _ in range(18):
+        for _ in range(_POLE_REFINE_STEPS):
             if fa < fb:
                 hi, b, fb = b, a, fa
                 a = hi-ratio*(hi-lo)

@@ -12,6 +12,7 @@ against identical scene state -- no production toggle required.
 """
 from pathlib import Path
 import importlib
+import os
 import tempfile
 
 fixture = Path(__file__).with_name('test_addon_registration_blender.py')
@@ -20,7 +21,11 @@ exec(compile(fixture.read_text().split('addon_utils.disable(MODULE')[0], str(fix
 ik_channels = importlib.import_module(MODULE + '.source.extras.ik_channels')
 fcurve_compat = importlib.import_module(MODULE + '.source.anim.fcurve_compat')
 
-BASELINE = ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'
+# Per-Blender-version baselines are kept in separate directories, since a
+# .blend written by a newer Blender should not be fed to an older one.
+BASELINE = Path(os.environ.get(
+    'SUB_BASELINE_BLEND',
+    ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'))
 
 # Pose matrices are single precision, and the two paths reach the same basis by
 # different arithmetic, so exact equality is not available. A wrong pole angle

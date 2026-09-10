@@ -20,7 +20,11 @@ exec(compile(fixture.read_text().split('addon_utils.disable(MODULE')[0], str(fix
 
 ik_channels = importlib.import_module(MODULE + '.source.extras.ik_channels')
 
-BASELINE = ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'
+# Per-Blender-version baselines are kept in separate directories, since a
+# .blend written by a newer Blender should not be fed to an older one.
+BASELINE = Path(os.environ.get(
+    'SUB_BASELINE_BLEND',
+    ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'))
 
 # Reference values measured on this rig before the IK performance work, so
 # this asserts "no worse than it was" rather than an aspirational bound.

@@ -8,6 +8,7 @@ synthetic rig covering the inheritance flags the module deliberately refuses.
 """
 from pathlib import Path
 import importlib
+import os
 import random
 
 from mathutils import Euler, Matrix, Vector
@@ -18,7 +19,11 @@ exec(compile(fixture.read_text().split('addon_utils.disable(MODULE')[0], str(fix
 pose_math = importlib.import_module(MODULE + '.source.extras.pose_math')
 
 TOLERANCE = 1e-5
-BASELINE = ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'
+# Per-Blender-version baselines are kept in separate directories, since a
+# .blend written by a newer Blender should not be fed to an older one.
+BASELINE = Path(os.environ.get(
+    'SUB_BASELINE_BLEND',
+    ROOT / '.tests' / 'benchmarks' / 'ik_apply' / 'out' / 'baseline.blend'))
 
 
 def max_difference(a: Matrix, b: Matrix) -> float:
