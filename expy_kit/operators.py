@@ -2935,9 +2935,6 @@ class BakeConstrainedActions(bpy.types.Operator):
     
     exclude_deform: BoolProperty(name="Exclude deform bones", default=False)
 
-    do_bake: BoolProperty(name="Bake and Exit", description="Bake driven motion and exit",
-                          default=False, options={'SKIP_SAVE'})
-    
     copy_visibility_fcurves: BoolProperty(name="Copy Vis Layers", 
                                         description="Link SAP Data animations to the new retargeted animation instead of the _old one", 
                                         default=False)
@@ -2982,10 +2979,6 @@ class BakeConstrainedActions(bpy.types.Operator):
         row.label(text="")
         row.prop(self, "keep_ik_bones")
 
-        row = column.split(factor=0.30, align=True)
-        row.label(text="")
-        row.prop(self, "do_bake", toggle=True)
-
     @classmethod
     def poll(cls, context):
         return context.mode == 'POSE'
@@ -3006,10 +2999,6 @@ class BakeConstrainedActions(bpy.types.Operator):
         return None
 
     def execute(self, context):
-        if not self.do_bake:
-            self.report({'INFO'}, "Enable 'Bake and Exit' to run the bake")
-            return {'FINISHED'}
-
         sel_obs = [ob for ob in context.selected_objects if ob and ob.type == 'ARMATURE']
         if not sel_obs and context.object and context.object.type == 'ARMATURE':
             sel_obs = [context.object]

@@ -1416,13 +1416,6 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
         default=False
     )
     
-    do_bake: bpy.props.BoolProperty(
-        name="Bake and Exit",
-        description="Bake driven motion and exit",
-        default=True,
-        options={'SKIP_SAVE'}
-    )
-    
     copy_visibility_fcurves: bpy.props.BoolProperty(
         name="Copy Vis Layers",
         description="Link SAP Data animations to the new retargeted animation",
@@ -1516,11 +1509,6 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
             row = column.split(factor=0.30, align=True)
             row.label(text="")
             row.prop(self, "clear_constraints_after")
-        
-        column.separator()
-        row = column.split(factor=0.30, align=True)
-        row.label(text="")
-        row.prop(self, "do_bake", toggle=True)
     
     def _get_trg_ob(self, ob):
         """Get target object from constrained bones"""
@@ -1543,10 +1531,6 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
         return None
     
     def execute(self, context):
-        if not self.do_bake:
-            self.report({'INFO'}, "Enable 'Bake and Exit' to run the bake")
-            return {'FINISHED'}
-        
         if self.bake_mode == 'VISIBLE':
             return self._execute_bake_visible(context)
         else:
@@ -1634,7 +1618,6 @@ class ULTIMATE_OT_bake_actions(bpy.types.Operator):
             exclude_deform=self.exclude_deform,
             copy_visibility_fcurves=self.copy_visibility_fcurves,
             keep_ik_bones=self.keep_ik_bones,
-            do_bake=True,
         )
         try:
             result = bpy.ops.armature.expykit_bake_constrained_actions(
