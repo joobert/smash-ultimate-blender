@@ -493,9 +493,6 @@ class SUB_PT_apply_ik_animation_panel(bpy.types.Panel):
         layout = self.layout
         layout.operator("sub.apply_ik_animation", text="Bake & Remove IK")
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 def register():

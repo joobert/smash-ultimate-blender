@@ -21,9 +21,6 @@ class SUB_PT_helper_bone_data_master(Panel):
         shbd: SubHelperBoneData = arma.data.sub_helper_bone_data
         layout = self.layout
 
-    def draw_header_preset(self, context):
-        from ...ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_PT_helper_bone_data_aim_constraints(Panel):
     bl_label = "Aim Constraints"
@@ -84,9 +81,6 @@ class SUB_PT_helper_bone_data_aim_constraints(Panel):
         row = layout.row()
         row.prop(active_entry, 'quat2')
 
-    def draw_header_preset(self, context):
-        from ...ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_PT_helper_bone_data_orient_constraints(Panel):
     bl_label = "Orient Constraints"
@@ -147,9 +141,6 @@ class SUB_PT_helper_bone_data_orient_constraints(Panel):
         row = layout.row()
         row.prop(active_entry, 'range_max')
 
-    def draw_header_preset(self, context):
-        from ...ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_PT_helper_bone_data_version_info(Panel):
@@ -177,9 +168,6 @@ class SUB_PT_helper_bone_data_version_info(Panel):
         row = layout.row()
         row.prop(shbd, 'major_version')
 
-    def draw_header_preset(self, context):
-        from ...ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_UL_aim_constraints(UIList):
     def draw_item(self, _context, layout, _data, item, icon, active_data, _active_propname, index):

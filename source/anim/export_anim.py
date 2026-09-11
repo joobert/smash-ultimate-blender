@@ -383,104 +383,55 @@ class SUB_OP_deselect_all_actions(Operator):
             action.export = False
         return {'FINISHED'}
 
-class AnimationExportJob:
-    """Cooperatively evaluate Blender data without calling bpy from worker threads."""
-    _timer = None
-    _job = None
-    _running = False
+class AnimationExport:
+    """Run exports synchronously, as before 5d3d8da, and restore scene state."""
 
     def execute(self, context):
-        if AnimationExportJob._running:
-            self.report({'WARNING'}, 'An animation export is already running')
-            return {'CANCELLED'}
         obj = context.active_object
-        self._object = obj
-        self._scene = context.scene
-        self._frame = (context.scene.frame_current, context.scene.frame_subframe)
-        self._actions = []
+        scene = context.scene
+        frame = (scene.frame_current, scene.frame_subframe)
+        actions = []
         for owner in (obj, obj.data):
             anim = owner.animation_data
-            self._actions.append((owner, anim is not None,
-                                  anim.action if anim else None,
-                                  getattr(anim, 'action_slot', None) if anim else None))
-        self._auto_key = context.scene.tool_settings.use_keyframe_insert_auto
-        context.scene.tool_settings.use_keyframe_insert_auto = False
-        self._job = self.export_steps(context)
-        from ..export_progress import ExportProgress
-        self._progress = ExportProgress(context)
-        self._progress.__enter__()
-        AnimationExportJob._running = True
-        if bpy.app.background:
-            try:
-                while True:
-                    next(self._job)
-            except StopIteration as done:
-                return done.value or {'FINISHED'}
-            finally:
-                self._finish(context)
+            actions.append((owner, anim is not None, anim.action if anim else None,
+                            getattr(anim, 'action_slot', None) if anim else None))
+        auto_key = scene.tool_settings.use_keyframe_insert_auto
+        scene.tool_settings.use_keyframe_insert_auto = False
+        steps = None
         try:
-            self._timer = context.window_manager.event_timer_add(0.02, window=context.window)
-            context.window_manager.modal_handler_add(self)
-            context.workspace.status_text_set('Exporting animation... Esc to cancel')
-        except Exception:
-            self._finish(context)
-            raise
-        return {'RUNNING_MODAL'}
-
-    def modal(self, context, event):
-        if event.type == 'ESC':
-            self._finish(context)
-            self.report({'INFO'}, 'Export cancelled; completed files are retained')
-            return {'CANCELLED'}
-        if event.type != 'TIMER' or event.timer != self._timer:
-            return {'RUNNING_MODAL'}
-        deadline = time.perf_counter() + 0.012
-        try:
-            while time.perf_counter() < deadline:
-                next(self._job)
-        except StopIteration as done:
-            self._finish(context)
-            return done.value or {'FINISHED'}
-        except Exception as exc:
-            self._finish(context)
-            self.report({'ERROR'}, f'Animation export failed: {exc}')
-            return {'CANCELLED'}
-        for area in context.screen.areas:
-            area.tag_redraw()
-        return {'RUNNING_MODAL'}
-
-    def cancel(self, context):
-        # File-browser cancellation happens before an export job exists.
-        if self._job is not None:
-            self._finish(context)
-
-    def _finish(self, context):
-        try:
-            if self._job is not None:
-                self._job.close()
-                self._job = None
-            for owner, had_animation, action, slot in self._actions:
-                if had_animation:
-                    owner.animation_data.action = action
-                    if slot is not None:
-                        owner.animation_data.action_slot = slot
-                elif owner.animation_data:
-                    owner.animation_data_clear()
-            self._scene.frame_set(self._frame[0], subframe=self._frame[1])
+            steps = self.export_steps(context)
+            while True:
+                try:
+                    next(steps)
+                except StopIteration as done:
+                    return done.value or {'FINISHED'}
         finally:
-            self._scene.tool_settings.use_keyframe_insert_auto = self._auto_key
-            if self._timer is not None:
-                context.window_manager.event_timer_remove(self._timer)
-                self._timer = None
-            if context.workspace:
-                context.workspace.status_text_set(None)
-            if getattr(self, "_progress", None) is not None:
-                self._progress.__exit__(None, None, None)
-                self._progress = None
-            AnimationExportJob._running = False
+            # Attempt every restoration even when a datablock was removed or a
+            # generator finalizer fails. There is no persistent export job state.
+            errors = []
+            def restore(callback):
+                try:
+                    callback()
+                except Exception as exc:
+                    errors.append(exc)
+            if steps is not None:
+                restore(steps.close)
+            for owner, had_animation, action, slot in actions:
+                def restore_action():
+                    if had_animation:
+                        owner.animation_data.action = action
+                        if slot is not None:
+                            owner.animation_data.action_slot = slot
+                    elif owner.animation_data:
+                        owner.animation_data_clear()
+                restore(restore_action)
+            restore(lambda: scene.frame_set(frame[0], subframe=frame[1]))
+            restore(lambda: setattr(scene.tool_settings, 'use_keyframe_insert_auto', auto_key))
+            for error in errors:
+                self.report({'WARNING'}, f'Could not restore animation state: {error}')
 
 
-class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
+class SUB_OP_batch_export_anim(AnimationExport, Operator):
     bl_idname = 'sub.batch_export_anim'
     bl_label = 'Batch Export Animations'
     bl_description = 'Export the selected actions as .nuanmb animation files'
@@ -586,8 +537,6 @@ class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
     
     def draw(self, context):
         layout = self.layout
-        from .motion_list_ui import draw_settings
-        draw_settings(layout, context)
         layout.prop(self, "include_transform_track")
         layout.prop(self, "include_material_track")
         layout.prop(self, "include_visibility_track")
@@ -660,7 +609,7 @@ class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
         # Save directory for future use
         ssp.last_anim_export_dir = self.directory
         
-        # Count selected actions for progress reporting
+        # Collect the actions selected for export.
         selected_actions = [item for item in ssp.action_export_list if item.export]
         total_count = len(selected_actions)
         
@@ -672,7 +621,7 @@ class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
         start_time = time.perf_counter()
         
         export_count = 0
-        for i, item in enumerate(selected_actions):
+        for item in selected_actions:
             if not item.export:
                 continue
                 
@@ -728,9 +677,6 @@ class SUB_OP_batch_export_anim(AnimationExportJob, Operator):
                         self.transform_override_compensate_scale)
                 
                 export_count += 1
-                # Report progress
-                progress = (i + 1) / total_count * 100
-                self.report({'INFO'}, f"Exported {i+1}/{total_count} ({progress:.1f}%): {action_name}")
                 
             except Exception as e:
                 self.report({'ERROR'}, f"Failed to export {safe_name}: {str(e)}")
@@ -783,10 +729,6 @@ def ensure_nuanmb_filepath(filepath):
     return filename
 
 
-from ..export_progress import export_progress
-
-
-@export_progress
 def export_raw_animation_for_object(
     context: Context,
     operator: Operator,
@@ -899,7 +841,7 @@ class SUB_OP_raw_anim_export(Operator):
         return {'FINISHED'}
 
 
-class SUB_OP_anim_export(AnimationExportJob, Operator):
+class SUB_OP_anim_export(AnimationExport, Operator):
     bl_idname = 'sub.anim_export'
     bl_label = 'Export Anim'
     bl_description = 'Export the active action as a .nuanmb animation file'
@@ -1019,8 +961,6 @@ class SUB_OP_anim_export(AnimationExportJob, Operator):
 
     def draw(self, context):
         layout = self.layout
-        from .motion_list_ui import draw_settings
-        draw_settings(layout, context)
         layout.prop(self, "include_transform_track")
         layout.prop(self, "include_material_track")
         layout.prop(self, "include_visibility_track")
@@ -1238,11 +1178,11 @@ def transform_group_fix_floating_point_inaccuracies(trans_group: ssbh_data_py.an
                 if isclose(current_transform.translation[i], first_transform.translation[i], abs_tol=.00001):
                     track.values[current_transform_index].translation[i] = first_transform.translation[i]
 
-def save_ssbh_anim_data(ssbh_anim_data, filepath, operator=None):
+def save_ssbh_anim_data(ssbh_anim_data, filepath, operator=None, action=None):
     """Validate optional motion edits before export, then commit after saving."""
     from .motion_list_ui import prepare, commit
     settings = getattr(bpy.context.scene, 'sub_motion_list', None)
-    prepared = prepare(settings, filepath, ssbh_anim_data.final_frame_index) if settings else None
+    prepared = prepare(settings, filepath, action) if settings else None
     saved_path = _save_ssbh_anim_data(ssbh_anim_data, filepath, operator)
     if os.path.abspath(saved_path) == os.path.abspath(filepath):
         commit(prepared, operator)
@@ -1414,7 +1354,6 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
             transform_subtype = matches.groups()[1]
             if transform_subtype == 'location':
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
-                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1426,7 +1365,6 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
             elif transform_subtype == 'rotation_quaternion':
                 bones_with_quat.add(bone_name)
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
-                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1440,7 +1378,6 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
             elif transform_subtype == 'rotation_euler':
                 bones_with_euler.add(bone_name)
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
-                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1451,7 +1388,6 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
                         bone_name_to_euler_values[bone_name][index].z = fcurve.evaluate(frame)
             elif transform_subtype == 'scale':
                 for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
-                    context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                     yield
                     _ensure_export_bone(bone_name)
                     if fcurve.array_index == 0:
@@ -1469,7 +1405,6 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
         for bone_name, scale_values_list in bone_name_to_scale_values.items():
             yield
             for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
-                context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                 yield
                 scale = scale_values_list[index]
                 negative_axis: set[str] = set()
@@ -1704,7 +1639,6 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
                     mat_name_prop_name_to_values[material_name][property_name] = []
             # Finally can add the values at each frame
             for index, frame in enumerate(range(first_blender_frame, last_blender_frame+1)):
-                context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
                 yield
                 if mat_track_property.sub_type == 'VECTOR':
                     mat_name_prop_name_to_values[material_name][property_name][index][fcurve.array_index] = fcurve.evaluate(frame)
@@ -1758,7 +1692,8 @@ def export_model_anim_fast_steps(context, operator: bpy.types.Operator, arma: bp
                     track.values = [track.values[0]]
     
     # Done!
-    save_ssbh_anim_data(ssbh_anim_data, filepath, operator) 
+    save_ssbh_anim_data(ssbh_anim_data, filepath, operator,
+                        action=arma.animation_data.action if arma.animation_data else None)
                 
 def export_camera_anim(*args, **kwargs):
     for _ in export_camera_anim_steps(*args, **kwargs):
@@ -1792,7 +1727,6 @@ def export_camera_anim_steps(context, operator, camera: bpy.types.Object, filepa
         override_compensate_scale=transform_override_compensate_scale
     )
     for index, frame in enumerate(range(first_blender_frame, last_blender_frame + 1)):
-        context.window_manager.progress_update(95 * index / max(1, last_blender_frame - first_blender_frame + 1))
         yield
         context.scene.frame_set(frame)
         track_name_to_track['FieldOfView'].values.append(camera.data.angle_y)
@@ -1819,4 +1753,5 @@ def export_camera_anim_steps(context, operator, camera: bpy.types.Object, filepa
     ssbh_anim_data.groups.append(transform_group)
     ssbh_anim_data.groups.append(camera_group)
 
-    save_ssbh_anim_data(ssbh_anim_data, filepath, operator)
+    save_ssbh_anim_data(ssbh_anim_data, filepath, operator,
+                        action=camera.animation_data.action if camera.animation_data else None)

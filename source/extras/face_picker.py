@@ -2746,9 +2746,6 @@ class SUB_PT_face_picker_window(Panel):
         self.layout.use_property_decorate = False
         draw_popup_picker_layout(self.layout, context)
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_PT_face_picker_anim_data(Panel):
@@ -2769,9 +2766,6 @@ class SUB_PT_face_picker_anim_data(Panel):
         self.layout.use_property_decorate = False
         draw_face_picker_layout(self.layout, context, show_grid=False)
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 def _draw_texture_2d_compat(texture, position, width, height):

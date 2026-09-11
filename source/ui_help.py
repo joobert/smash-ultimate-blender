@@ -33,6 +33,12 @@ def unregister_retired_panels():
 def panel_doc_path(panel):
     module = type(panel).__module__
     name = type(panel).__name__
+    if 'attribute_renamer' in module:
+        return 'docs/attribute-renamer.md'
+    if 'reimport_materials' in module:
+        return 'docs/material-reimporter.md'
+    if name == 'SUB_PT_raw_animations':
+        return 'README.md#raw-animations'
     if 'motion_list' in module:
         return 'docs/motion-list.md'
     if '.retargeting' in module:
@@ -79,6 +85,11 @@ def panel_doc_path(panel):
 
 
 def draw_panel_help(layout, panel):
+    # Also guard inherited callbacks and panels moved to another editor/tab.
+    if (getattr(panel, 'bl_space_type', None) != 'VIEW_3D'
+            or getattr(panel, 'bl_region_type', None) != 'UI'
+            or getattr(panel, 'bl_category', None) != 'Ultimate'):
+        return
     row = layout.row(align=True)
     row.scale_x = 1.0
     row.operator('wm.url_open', text='?', emboss=False).url = DOCS_ROOT + panel_doc_path(panel)

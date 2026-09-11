@@ -101,6 +101,7 @@ def register():
         type=SUB_PG_shpc_settings
     )
 
+
 class ModelImportFile(PropertyGroup):
     name: StringProperty()
 

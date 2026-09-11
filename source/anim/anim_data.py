@@ -335,7 +335,14 @@ class SUB_OP_sync_sap_action(Operator):
             self.report({'INFO'}, f"Synced SAP action to: {expected_sap_action_name}")
         else:
             self.report({'WARNING'}, f"No matching SAP action found: {expected_sap_action_name}")
-            
+
+        # Best effort: a missing motion list should not fail the SAP sync.
+        from . import motion_list_ui
+        try:
+            self.report({'INFO'}, motion_list_ui.load_into_action(context))
+        except Exception as error:
+            self.report({'WARNING'}, f"Motion list not synced: {error}")
+
         return {'FINISHED'}
 
 class SUB_PT_sub_smush_anim_data_main(Panel):
@@ -356,7 +363,8 @@ class SUB_PT_sub_smush_anim_data_main(Panel):
         layout = self.layout
         ssp = context.scene.sub_scene_properties
         
-        # Show auto-sync status and manual control
+        # Auto-sync toggles share one split row; manual sync spans both below them.
+        motion = context.scene.sub_motion_list
         box = layout.box()
         row = box.row(align=True)
         row.prop(
@@ -366,16 +374,20 @@ class SUB_PT_sub_smush_anim_data_main(Panel):
             toggle=True,
             icon='CHECKMARK' if ssp.sap_auto_sync_enabled else 'PAUSE',
         )
-        row.operator(SUB_OP_sync_sap_action.bl_idname, icon='FILE_REFRESH', text="Manual Sync")
-        if not ssp.sap_auto_sync_enabled:
+        row.prop(
+            motion,
+            "auto_sync",
+            text="Motion List Auto-Sync",
+            toggle=True,
+            icon='CHECKMARK' if motion.auto_sync else 'PAUSE',
+        )
+        box.row().operator(SUB_OP_sync_sap_action.bl_idname, icon='FILE_REFRESH', text="Manual Sync")
+        if not (ssp.sap_auto_sync_enabled and motion.auto_sync):
             col = box.column(align=True)
             col.scale_y = 0.85
             col.label(text="Off: use Manual Sync after switching actions.", icon='INFO')
         layout.operator("sub.face_picker_popup", text="Easy Facial Animation", icon="IMAGE_DATA")
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_PT_sub_smush_anim_data_vis_tracks(Panel):
     bl_label = "Ultimate Visibility Track Entries"
@@ -420,9 +432,6 @@ class SUB_PT_sub_smush_anim_data_vis_tracks(Panel):
         op = row.operator(SUB_OP_purge_unused_vis_tracks.bl_idname, text="Purge All Anims", icon='TRASH')
         op.scope = 'ALL'
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_PT_sub_smush_anim_data_mat_tracks(Panel):
     bl_label = "Ultimate Material Tracks"
@@ -522,9 +531,6 @@ class SUB_PT_sub_smush_anim_data_mat_tracks(Panel):
         sr = split.row(align=True)
         sr.menu('SUB_MT_mat_entry_context_menu', text='Drivers...')      
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_OP_mat_track_add(Operator):
     bl_description = 'Add an animated material track to the active armature'

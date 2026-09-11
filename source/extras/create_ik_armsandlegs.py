@@ -60,9 +60,6 @@ class SUB_PT_ik_bones_panel(bpy.types.Panel):
         layout = self.layout
         layout.operator("sub.create_ik_bones", text="Generate IK Bones")
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 def register():

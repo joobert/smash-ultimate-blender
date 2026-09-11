@@ -5248,9 +5248,6 @@ class RENDER_PT_smash_viewport(bpy.types.Panel):
             icon="FILEBROWSER",
         )
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_RenderEngine_smash_viewport(bpy.types.RenderEngine):

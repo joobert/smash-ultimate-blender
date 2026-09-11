@@ -9,7 +9,6 @@ from pathlib import Path
 import struct
 import tempfile
 import zlib
-import subprocess
 
 FLAGS = ('turn', 'loop', 'move', 'fix_trans', 'fix_rot', 'fix_scale',
          'unk_40', 'unk_80', 'unk_100', 'unk_200', 'unk_400', 'unk_800',
@@ -105,41 +104,26 @@ def encode_binary(doc):
     return bytes(data)
 
 
+# YAML is preferred so an edit lands in the readable file when both exist.
+DISCOVERY_ORDER = ('.yml', '.yaml', '.bin')
+
+
 def discover(animation_path):
-    """Nearest list up to and including /motion; reject competing formats."""
+    """The one list to read and write, from the nearest directory up to /motion."""
     folder = Path(animation_path).resolve().parent
     for directory in (folder, *folder.parents):
-        candidates = [directory / ('motion_list' + suffix) for suffix in ('.bin', '.yml', '.yaml')]
-        found = [path for path in candidates if path.is_file()]
-        if len(found) > 1:
-            raise ValueError(f'Multiple motion lists in {directory}; choose a file explicitly')
-        if found:
-            return found[0]
+        for suffix in DISCOVERY_ORDER:
+            path = directory / ('motion_list' + suffix)
+            if path.is_file():
+                return [path]
         if directory.name.lower() == 'motion':
             break
-    return None
+    return []
 
 
-def _convert(converter, command, source, target):
-    result = subprocess.run([converter, command, str(source), '-o', str(target)],
-                            capture_output=True, text=True, timeout=60,
-                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    if result.returncode or not Path(target).is_file():
-        raise ValueError(f'yamlist {command} failed: {result.stderr or result.stdout}')
-
-
-def load(path, converter=''):
+def load(path):
     path = Path(path)
     if path.suffix.lower() == '.bin':
-        if converter:
-            # Refuse flags that yamlist's public schema cannot represent.
-            binary = decode_binary(path.read_bytes())
-            if any(m['_reserved_flags'] for m in binary['list'].values()):
-                raise ValueError('Reserved flag bits require the built-in binary codec; clear the yamlist path')
-            with tempfile.TemporaryDirectory(prefix='sub_motion_') as folder:
-                output = Path(folder) / 'motion_list.yml'
-                _convert(converter, 'disasm', path.resolve(), output)
-                return load(output)
         return decode_binary(path.read_bytes())
     if path.suffix.lower() not in ('.yml', '.yaml'):
         raise ValueError('Choose a .bin, .yml, or .yaml motion list')
@@ -160,6 +144,8 @@ def load(path, converter=''):
         raise ValueError('Expected a motion_path and list mapping')
     # Validate the complete schema and byte ranges before offering edits.
     encode_binary(doc)
+    from . import hash_labels
+    hash_labels.harvest(doc)
     return doc
 
 
@@ -208,25 +194,33 @@ def update(doc, animation_name, *, cancel=None, blend=None, flags=None,
     return result
 
 
-def save(path, doc, *, expected=None, converter=''):
+def labeled(doc):
+    """Copy with resolvable hashes replaced by names; re-encodes identically."""
+    from . import hash_labels
+    result = dict(doc)
+    result['motion_path'] = hash_labels.label(doc['motion_path'])
+    result['list'] = {}
+    for key, motion in doc['list'].items():
+        entry = copy.deepcopy(motion)
+        entry['game_script'] = hash_labels.label(entry['game_script'])
+        entry['scripts'] = [hash_labels.label(script) for script in entry['scripts']]
+        entry['animations'] = [dict(animation, name=hash_labels.label(animation['name']))
+                               for animation in entry['animations']]
+        result['list'][hash_labels.label(key)] = entry
+    if encode_binary(result) != encode_binary(doc):
+        raise ValueError('Label substitution changed the motion list; refusing to write')
+    return result
+
+
+def save(path, doc, *, expected=None):
     """Atomic replacement with a one-time original backup and conflict check."""
     path = Path(path)
     encode_binary(doc)
     if path.suffix.lower() == '.bin':
         data = encode_binary(doc)
-        if converter:
-            from ...dependencies import yaml
-            with tempfile.TemporaryDirectory(prefix='sub_motion_') as folder:
-                source = Path(folder) / 'motion_list.yml'
-                target = Path(folder) / 'motion_list.bin'
-                source.write_text(yaml.safe_dump(doc, sort_keys=False), encoding='utf-8')
-                _convert(converter, 'asm', source, target)
-                data = target.read_bytes()
-                if decode_binary(data) != decode_binary(encode_binary(doc)):
-                    raise ValueError('yamlist output did not preserve the motion-list data')
     else:
         from ...dependencies import yaml
-        data = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True).encode('utf-8')
+        data = yaml.safe_dump(labeled(doc), sort_keys=False, allow_unicode=True).encode('utf-8')
     original = path.read_bytes()
     if expected is not None and original != expected:
         raise ValueError('Motion list changed on disk; load it again before exporting')
@@ -244,3 +238,21 @@ def save(path, doc, *, expected=None, converter=''):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def load_all(paths):
+    """Decode the first path; remember every path's bytes for conflict checks."""
+    paths = [Path(path) for path in paths]
+    if not paths:
+        raise ValueError('No motion_list.yml/.yaml/.bin found beside the animation or up to /motion')
+    originals = {path: path.read_bytes() for path in paths}
+    return load(paths[0]), paths[0], originals
+
+
+def save_all(originals, doc):
+    """Write every file from one document, or none of them."""
+    for path, expected in originals.items():
+        if Path(path).read_bytes() != expected:
+            raise ValueError(f'{Path(path).name} changed on disk; load it again before exporting')
+    for path, expected in originals.items():
+        save(path, doc, expected=expected)

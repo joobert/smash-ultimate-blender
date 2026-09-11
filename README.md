@@ -44,13 +44,16 @@ These are the pieces that are **not** in the main plugin, or are substantially d
 
 ### Animation importer and exporter
 
-Each panel has a small **?** in its header linking to its documentation. Hover
-over buttons for a description of their operation.
+Panels in the 3D Viewport's **Ultimate** sidebar tab have a small **?** in
+their headers linking to documentation, including nested panels. Properties
+panels and other tabs do not show these help buttons. Hover over controls for
+a description of their operation.
 
-The exporter can also read and update **motion_list.bin/.yml/.yaml** alongside
-animations, including cancel frames, blend frames, flags, and template-based new
-entries. See [Motion list integration](docs/motion-list.md) for detection rules,
-frame conventions, and backup behavior.
+The **Ultimate Motion List** panel, under Ultimate Animation Data, reads and
+updates **motion_list.bin/.yml/.yaml** alongside animation exports: a cancel
+frame placed as a timeline marker, plus per-animation blend frames and Turn,
+Loop, and Move flags. See [Motion list integration](docs/motion-list.md) for
+detection rules, frame conventions, and backup behavior.
 
 ![Ultimate tab: model and animation importer](docs/readme/ultimate-tab.png)
 
@@ -74,6 +77,23 @@ frame conventions, and backup behavior.
 - **Export Raw Animation** and **Include Raw with .NUANMB Export** live in the **Raw Animations** panel, not here
 - Bone override list, populate-from-armature, **Thrown** preset
 - Bones named `BL_*` are skipped on anim (and model) export so helper controls never ship in-game
+
+### Raw Animations
+
+Use **Ultimate → Raw Animations** with a selected armature for editable
+animation round trips. `.rawanim` stores sparse pose/IK keys instead of the
+per-frame baked motion used by game `.nuanmb` files; export `.nuanmb` for the game.
+
+Choose **Browse Raw Animation Folder**, select a clip, and use **Import Selected
+Raw Animation**, or use **Import All Raw Animations**. **Import Raw Animation
+File** opens an individual file directly. Refresh the list after changing files
+on disk. Fighter `motion/body` folders can discover their associated `rawanims`
+directory automatically.
+
+**Export Raw Animation** saves the current animation. Enable **Include Raw with
+.NUANMB Export** here to include a raw companion when exporting game animations.
+Raw imports preserve authored target/pole channels; use a compatible armature
+and inspect the imported motion before further editing or game export.
 
 ### Model folders and export settings
 
@@ -154,6 +174,10 @@ armature pairing and combined skeleton controls remain together there.
 - **Refresh Bone Drawing** in Armature Data > Viewport Display works around invisible bones on imported rigs without retaining any rig edits
 - **Roll Value Copier** — copy bone roll from a source armature to a target (name-matched, optional selected-only)
 
+The separate [Attribute Renamer](docs/attribute-renamer.md) panel repairs first
+UV/color attribute names and can rename material/image datablocks. Read its
+scope carefully: the material and image commands affect the whole blend file.
+
 ### Texture optimization
 
 Select an object with an Ultimate material, then use **Optimize Textures** in its material UI. Choose which assigned images to resize and how many times to halve each dimension; the dialog previews dimensions and total pixel reduction. Zero steps keeps the original size, and dimensions never fall below one pixel.
@@ -169,6 +193,9 @@ and rasterizer states in their respective sections. Use **Copy From Other
 Material** to reuse settings. **Material Re-Importer** reloads model materials
 from disk. Animated material values live in the armature's animation data.
 
+See [Material Re-Importer](docs/material-reimporter.md) for folder selection,
+material-label matching, and copying material assignments between armatures.
+
 ### Swing physics
 
 Use **Swing** to import or export swing physics data. Define chains with start
@@ -176,6 +203,15 @@ and end bones, edit individual bone physics, and assign collision shapes to the
 chain's bones. The collision sections manage spheres, ovals, ellipsoids,
 capsules, planes, and connections. Bone and chain presets reuse physics values;
 inspect the mapping before applying a chain preset to a different skeleton.
+
+Select an armature in the viewport, then open **Ultimate → Swing** to access
+the import/export controls. Edit the imported data in the armature's **Object
+Data Properties → Ultimate Swing Data**. Bone Properties shows chain membership
+and collisions for an active swing bone. Swing chain bones must start with
+`S_`; terminal `_null` bones are needed by the chain but carry no individual
+physics settings. Inspect the chains and collision assignments before exporting.
+The sidebar's Swing exporter writes physics data separately from model and
+animation exports.
 
 ### Armature Collection Presets
 

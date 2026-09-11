@@ -72,9 +72,6 @@ class SUB_PT_refresh_bone_drawing_fallback(Panel):
         self.layout.use_property_decorate = False
         _draw_button(self.layout)
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 def _viewport_display_panels():

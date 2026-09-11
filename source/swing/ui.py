@@ -102,9 +102,6 @@ class SUB_PT_active_bone_swing_info(Panel):
         col.prop(swing_bone, 'ground_hit')
         col.prop(swing_bone, 'wind_affect')
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_PT_active_mesh_swing_info(Panel):
     bl_label = 'Ultimate Swing Data'
@@ -211,9 +208,6 @@ class SUB_PT_active_mesh_swing_info(Panel):
             layout.row().prop(swing_connection, "radius")
             layout.row().prop(swing_connection, "length")
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
         
 
 class SwingPropertyPanel: # Mix-in for the swing info property panel classes
@@ -235,9 +229,6 @@ class SUB_PT_swing_data_master(Panel, SwingPropertyPanel):
         layout = self.layout
         arma = context.object
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_PT_swing_bone_chains(Panel, SwingPropertyPanel):
     bl_label = "Swing Bone Chains"
@@ -411,9 +402,6 @@ class SUB_PT_swing_bone_chains(Panel, SwingPropertyPanel):
 
         return
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 class SUB_UL_swing_bone_chains(UIList):
     def draw_item(self, _context, layout, _data, item, icon, active_data, _active_propname, index):
@@ -523,9 +511,6 @@ class SUB_PT_swing_data_spheres(Panel, SwingPropertyPanel):
         row = layout.row()
         row.prop(active_sphere, 'radius')
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_UL_swing_data_spheres(UIList):
@@ -584,9 +569,6 @@ class SUB_PT_swing_data_ovals(Panel, SwingPropertyPanel):
         row = layout.row()
         row.prop(active_oval, 'end_offset')
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_UL_swing_data_ovals(UIList):
@@ -643,9 +625,6 @@ class SUB_PT_swing_data_ellipsoids(Panel, SwingPropertyPanel):
         row = layout.row()
         row.prop(active_ellipsoid, 'scale')
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_UL_swing_data_ellipsoids(UIList):
@@ -707,9 +686,6 @@ class SUB_PT_swing_data_capsules(Panel, SwingPropertyPanel):
         row = layout.row()
         row.prop(active_capsule, 'end_radius')
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_UL_swing_data_capsules(UIList):
@@ -769,9 +745,6 @@ class SUB_PT_swing_data_planes(Panel, SwingPropertyPanel):
         row = layout.row()
         row.prop(active_plane, 'distance')
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_UL_swing_data_planes(UIList):
@@ -829,9 +802,6 @@ class SUB_PT_swing_data_connections(Panel, SwingPropertyPanel):
         row = layout.row()
         row.prop(active_connection, 'length')
 
-    def draw_header_preset(self, context):
-        from ..ui_help import draw_panel_help
-        draw_panel_help(self.layout, self)
 
 
 class SUB_UL_swing_data_connections(UIList):
