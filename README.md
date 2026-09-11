@@ -129,6 +129,7 @@ Setup details: [Model workflow folders](docs/model-workflow-folders.md).
 - **Idle Pose Library** — predefined poses come from the active animation folder and refresh when it changes. Applying reads the source clip on demand; custom stored poses remain available across folder changes. Options include Trans, mirrored, and 180 rotate
 - **User Poses** — **Save Pose**, **Remove Pose**, and **Apply to Current Frame**, with an option to affect only selected bones
 - **IK Tools** — create arm/leg IK, bake & remove IK/FK, toggle influence, **Bulk IK** on every loaded animation
+- **Reverse-foot controls** — leg IK includes a toe-base `FootRollIK` pivot and a separate `ToeIK` rotation control. Enable **Pin Toe** under Live Floor Contact to hold that calibrated toe pivot while rolling the heel/backfoot; the toe control follows the existing IK/FK blend
 - **Mirror Animation** — space, Smash Y Anim Flip, custom extra bones, **Mirror All Loaded Animations**. Newly imported actions rebuild their Smash pose cache from the source `.nuanmb` when first needed; if the source has moved, mirroring falls back to the armature-derived pose path
 - **Misc Anim Stuff** (collapsible) — Transfer Hip Animation to Trans, Reset Bone Locations, Ground Character, Invert Positive and Negative, Remove Animation from Swing Bones, **GIF or Photo** (also on the Action Editor header)
 - **Animation Layers** — when the Animation Layers addon is installed, its UI is embedded in a collapsible section here, and layer handlers are paused around rig edits that would otherwise crash Blender

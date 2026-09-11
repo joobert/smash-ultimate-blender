@@ -23,8 +23,8 @@ def _changed(self, context):
     self.id_data.update_tag()
 
 
-def _driver(owner, prop, expression, variables):
-    driver = owner.driver_add(prop).driver
+def _driver(owner, prop, expression, variables, index=None):
+    driver = (owner.driver_add(prop, index) if index is not None else owner.driver_add(prop)).driver
     driver.type = 'SCRIPTED'
     for variable in list(driver.variables):
         driver.variables.remove(variable)
@@ -96,6 +96,8 @@ class SUB_PG_floor_limb(PropertyGroup):
     lock_rotation: BoolProperty(name='Lock Planted Rotation', default=False, update=_changed)
     rolling: BoolProperty(name='Heel / Toe Roll', default=True, update=_changed,
                          description='Keep the lowest calibrated point at the plant marker while rotating')
+    pin_toe: BoolProperty(name='Pin Toe', default=False, update=_changed,
+                         description='Use the calibrated toe marker as the fixed floor-contact pivot')
     raw: PointerProperty(type=bpy.types.Object)
     oriented: PointerProperty(type=bpy.types.Object)
     heel: PointerProperty(type=bpy.types.Object)
@@ -153,7 +155,10 @@ def setup_limb(context, arm, control, kind, points=None):
         ('alignment', 'Calibrated Orientation', False),
     ):
         setattr(limb, attr, _empty(context, arm, control + ' ' + label, size, visible))
-    _copy(limb.raw, 'COPY_TRANSFORMS', 'IK Input', arm, control)
+    from . import ik_channels
+    job = next((job for job in ik_channels.chains(arm) if job[2] == control), None)
+    source = ik_channels.endpoint_target(arm, job[1], control) if job else control
+    _copy(limb.raw, 'COPY_TRANSFORMS', 'IK Input', arm, source)
     _copy(limb.oriented, 'COPY_TRANSFORMS', 'IK Orientation', limb.raw)
     points = points or _point_defaults(arm, control, context.scene.sub_floor_height)
     for marker, point in zip((limb.heel, limb.toe), points):
@@ -196,6 +201,7 @@ def configure(scene, arm, limb):
         'rh': (arm, path + '.release_height'),
         'rd': (arm, path + '.release_distance'),
         'friction': (arm, path + '.resistance'),
+        'toe_pin': (arm, path + '.pin_toe'),
         'floor': (scene, 'sub_floor_height'),
         'hz': (limb.heel, 'LOC_Z', ''), 'tz': (limb.toe, 'LOC_Z', ''),
         'hx': (limb.heel, 'LOC_X', ''), 'tx': (limb.toe, 'LOC_X', ''),
@@ -221,18 +227,19 @@ def configure(scene, arm, limb):
     lock = _copy(limb.oriented, 'COPY_ROTATION', 'Plant Rotation', limb.anchor)
     drive(lock, 'influence', 'on*en*(1-cal)*pin*lock', {'lock': (arm, path + '.lock_rotation')})
 
+
     # A stable local reference for horizontal contact: lowest point for rolling,
     # midpoint for a rigid plant. No stateful "previous frame" accumulator.
     for name, expression in (
-        ('px', '(hx if hz<=tz else tx) if roll else (hx+tx)/2'),
-        ('py', '(hy if hz<=tz else ty) if roll else (hy+ty)/2'),
-        ('ax', '(hax if hz<=tz else tax) if roll else (hax+tax)/2'),
-        ('ay', '(hay if hz<=tz else tay) if roll else (hay+tay)/2'),
-        ('d', 'min(hz,tz)-floor'),
+        ('px', 'tx if toe_pin else ((hx if hz<=tz else tx) if roll else (hx+tx)/2)'),
+        ('py', 'ty if toe_pin else ((hy if hz<=tz else ty) if roll else (hy+ty)/2)'),
+        ('ax', 'tax if toe_pin else ((hax if hz<=tz else tax) if roll else (hax+tax)/2)'),
+        ('ay', 'tay if toe_pin else ((hay if hz<=tz else tay) if roll else (hay+tay)/2)'),
+        ('d', '(tz if toe_pin else min(hz,tz))-floor'),
         ('attachment', 'max(0,min(1,(rh-max(0,d))/max(s,0.000001),(rd-sqrt((px-ax)**2+(py-ay)**2))/max(s,0.000001))) if auto else 0'),
         ('ease', 'attachment*attachment*(3-2*attachment)'),
-        ('weight', '1 if pin else max(ease,friction*max(0,1-max(0,d)/max(rh,0.000001)))'),
-        ('height', 'z-min(hz,tz)+floor+(0 if pin or d<=0 else (1-ease)*(d*d/s*(2-d/s) if s>0 and d<s else d))'),
+        ('weight', '1 if pin or toe_pin else max(ease,friction*max(0,1-max(0,d)/max(rh,0.000001)))'),
+        ('height', 'z-(tz if toe_pin else min(hz,tz))+floor+(0 if pin or toe_pin or d<=0 else (1-ease)*(d*d/s*(2-d/s) if s>0 and d<s else d))'),
     ):
         limb.solved[name] = 0.0
         drive(limb.solved, '["' + name + '"]', expression)
@@ -277,7 +284,8 @@ def rewire(arm):
         limb = by_control.get(control)
         if not limb:
             continue
-        mid = ik_channels.solve_bone(arm, names)
+        path = ik_channels.limb_path(arm, names)
+        mid = arm.pose.bones.get(ik_channels.PREFIX + path[-2]) if len(path) >= 2 else None
         end = arm.pose.bones.get(ik_channels.PREFIX + names[2])
         constraints = ([mid.constraints.get('SUB IK Solve')] if mid else [])
         constraints += ik_channels.end_constraints(end) if end else []
@@ -434,7 +442,8 @@ def serialize(arm):
         limbs.append({'control': limb.control, 'kind': limb.kind,
                       'points': [list(p.location) for p in (limb.heel, limb.toe)],
                       'alignment': list(limb.alignment.rotation_euler),
-                      'softness': limb.softness, 'rolling': limb.rolling})
+                      'softness': limb.softness, 'rolling': limb.rolling,
+                      'pin_toe': limb.pin_toe})
     if not limbs:
         return json.loads(arm.get(PENDING, '{}'))
     return {'version': 1, 'limbs': limbs}
@@ -475,6 +484,7 @@ def restore_pending(context, arm):
         limb = setup_limb(context, arm, control, item['kind'], item['points'])
         limb.softness = max(0.0, float(item.get('softness', .05)))
         limb.rolling = bool(item.get('rolling', True))
+        limb.pin_toe = bool(item.get('pin_toe', False))
         limb.alignment.rotation_euler = item.get('alignment', (0, 0, 0))
 
 
@@ -499,6 +509,7 @@ def mirror(context, arm, limb):
         marker.location = point
     other.softness = limb.softness
     other.rolling = limb.rolling
+    other.pin_toe = limb.pin_toe
     limb.mirror_source = ''
     other.mirror_source = limb.control
     capture(context, arm, other)
@@ -547,6 +558,9 @@ class SUB_OP_floor_contact(Operator):
             return {'CANCELLED'}
         try:
             if self.action == 'SETUP':
+                # Upgrade existing independent leg IK to the reverse-foot
+                # controls before contact helpers choose their input target.
+                ik_channels.ensure(arm, context)
                 jobs = list(ik_channels.chains(arm))
                 if not jobs:
                     raise ValueError('No supported IK chains found')
@@ -661,6 +675,10 @@ def draw(layout, context, arm):
         row.prop(limb, 'lock_rotation')
         if limb.kind == 'LEGS':
             col.prop(limb, 'rolling')
+            col.prop(limb, 'pin_toe')
+            if limb.pin_toe:
+                suffix = limb.control[6:] if limb.control.startswith('FootIK') else ''
+                col.label(text='Rotate FootRollIK' + suffix + ' to roll from the toe.')
         row = col.row(align=True)
         for action, label in (('SELECT', 'Edit Contact Markers'), ('MIRROR', 'Mirror Calibration')):
             op = row.operator('sub.floor_contact', text=label)
@@ -678,11 +696,32 @@ CLASSES = (SUB_PG_floor_limb, SUB_PG_floor_contact, SUB_OP_floor_contact)
 
 def _restore_contacts():
     """Repair saved helpers after Blender releases its registration restrictions."""
-    for obj in bpy.data.objects:
+    for obj in list(bpy.data.objects):
         if obj.get('sub_floor_owner') and obj.animation_data:
             for fc in obj.animation_data.drivers:
                 fc.mute = False
         if obj.type == 'ARMATURE' and obj.sub_floor_contact.limbs:
+            for limb in obj.sub_floor_contact.limbs:
+                # Remove the short-lived generated roll helper from files made
+                # by the previous implementation and restore the direct path.
+                old = bpy.data.objects.get(obj.name + ' • ' + limb.control + ' Foot Roll')
+                if old and old.get('sub_floor_owner') == obj:
+                    for marker in (limb.heel, limb.toe):
+                        if marker and marker.parent == old:
+                            location = marker.location.copy()
+                            marker.parent = limb.oriented
+                            marker.matrix_parent_inverse = Matrix.Identity(4)
+                            marker.location = location
+                    source = limb.solved.constraints.get('IK Source') if limb.solved else None
+                    if source:
+                        source.target = limb.oriented
+                    bpy.data.objects.remove(old, do_unlink=True)
+                suffix = limb.control[6:] if limb.control.startswith('FootIK') else ''
+                toe = obj.pose.bones.get('Toe' + suffix) if suffix else None
+                legacy = toe.constraints.get('SUB Pin Toe') if toe else None
+                if legacy:
+                    legacy.driver_remove('influence')
+                    toe.constraints.remove(legacy)
             rewire(obj)
             root = obj.pose.bones.get('Trans')
             if root and root.constraints.get(BODY_CONSTRAINT):

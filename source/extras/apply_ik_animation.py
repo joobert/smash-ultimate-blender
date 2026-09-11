@@ -59,7 +59,14 @@ def collect_fk_bone_names(armature_object, leg_bone_map=None, limbs=None):
     """FK bones to bake/clear — only for limbs that actually have IK on the rig."""
     if armature_object.data.get("sub_independent_ik"):
         from .ik_channels import chains
-        return list(dict.fromkeys(n for _, names, _, _ in chains(armature_object, limbs or present_ik_limbs(armature_object) or 'BOTH') for n in names))
+        selected = list(chains(armature_object, limbs or present_ik_limbs(armature_object) or 'BOTH'))
+        names = [n for _, chain, _, _ in selected for n in chain]
+        for kind, chain, _, _ in selected:
+            if kind == 'LEGS':
+                toe = 'Toe' + chain[2][4:]
+                if toe in armature_object.pose.bones:
+                    names.append(toe)
+        return list(dict.fromkeys(names))
     from .create_animation_rig import _ik_driven_fk_bone_names, _ik_limb_kind
 
     if limbs is None:

@@ -15,6 +15,15 @@ def _reset_auto_sync(self, context):
     _auto_synced_actions.clear()
 
 
+def _set_override_path(self, context):
+    """Seed the override field with the path auto-detection currently uses."""
+    if not self.override_path:
+        return
+    paths = motion_list.discover(_probe_path(context))
+    if paths:
+        self.filepath = str(paths[0].resolve())
+
+
 # Actions already auto-synced this session, keyed by armature name.
 _auto_synced_actions = {}
 
@@ -39,7 +48,8 @@ class SUB_PG_motion_list(bpy.types.PropertyGroup):
     filepath: StringProperty(name='Motion List', subtype='FILE_PATH',
         description='Choose motion_list.bin, .yml, or .yaml; leave empty to search beside the animation and up to /motion')
     override_path: BoolProperty(name='Override Path',
-        description='Choose the motion list by hand instead of detecting it beside the animation')
+        description='Choose the motion list by hand instead of detecting it beside the animation',
+        update=_set_override_path)
     auto_sync: BoolProperty(name='Motion List Auto-Sync', default=True,
         description='Load the matching motion-list entry automatically whenever the active action changes',
         update=_reset_auto_sync)
@@ -81,7 +91,7 @@ def active_action(context):
 
 def resolve_paths(settings, animation_path):
     """Explicit override targets one file; detection returns every format."""
-    if settings.filepath:
+    if settings.override_path and settings.filepath:
         path = Path(bpy.path.abspath(settings.filepath))
         if not path.is_file():
             raise ValueError(f'Motion list does not exist: {path}')
@@ -283,8 +293,6 @@ def _draw_entry_box(layout, context, settings):
     box.prop(settings, 'filepath', text='')
     note = box.column(align=True)
     note.scale_y = 0.85
-    if settings.filepath:
-        note.label(text=bpy.path.abspath(settings.filepath), icon='FILE_TICK')
     note.label(text='Only this file is written; siblings are untouched.', icon='INFO')
 
 

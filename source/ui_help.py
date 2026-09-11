@@ -1,5 +1,5 @@
 """Shared panel documentation links; keep destinations in step with README."""
-DOCS_ROOT = 'https://github.com/joobert/smash-ultimate-blender/blob/animation-workflow/'
+DOCS_ROOT = 'https://github.com/CrusherD2/smash-ultimate-blender/blob/animation-workflow/'
 
 # Retired panel types can survive an add-on reload or third-party tab reordering.
 # Their controls now live inside the parents' draw functions.
