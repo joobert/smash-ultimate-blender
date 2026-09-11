@@ -87,6 +87,8 @@ class SUB_PT_animation_tools(Panel):
                 col.operator("sub.create_ik_bones", text="Create IK Bones (Arms + Legs)")
                 col.operator("sub.create_arm_ik", text="Create Arm IK Bones")
                 col.operator("sub.create_foot_ik", text="Create Foot IK Bones")
+                from . import custom_ik
+                custom_ik.draw(box, context, find_anim_rig_armature(context))
                 col.separator()
 
                 # Same IK/FK switches + Match as Animation Rig

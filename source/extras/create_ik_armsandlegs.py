@@ -55,6 +55,10 @@ class SUB_PT_ik_bones_panel(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = 'IK Bones'
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
     def draw(self, context):
         self.layout.use_property_decorate = False
         layout = self.layout

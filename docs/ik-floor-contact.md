@@ -26,6 +26,11 @@ feet load with contact on. Calibrate hands flat against the floor before using
 their optional orientation alignment. Body height, plant locations, scene
 floor height, and animation-specific planting choices are not model calibration.
 
+Toe discovery is case-insensitive. A connected descendant whose name contains
+`BaseToe` or `ToeBase` (for example `BaseToeR`) is preferred over the `ToeR`
+root as the reverse-foot pivot and initial Toe marker. Other connected bones
+containing `Toe` remain part of the leg's IK/FK animation handling.
+
 ## Pose and plant
 
 - **Floor Height** is a world Z value belonging to the scene, initially zero.
@@ -77,8 +82,8 @@ removes this armature's contact helpers. The existing IK removal workflow also
 cleans up contact for the removed limbs. Saved external calibration presets
 remain available.
 
-Helpers live in the **IK Floor Contact** collection. Use **Show Contact
-Markers** to hide their visible markers; excluding the helper collection from
+Helpers live in the **IK Floor Contact** collection and start hidden. Use
+**Show Contact Markers** to reveal their editable markers; excluding the helper collection from
 evaluation disables the mechanism. Foot protection uses the two calibrated
 points, not every mesh vertex, so extreme sideways rolls may need additional
 manual clearance. There is no wall, ledge, or moving-weapon contact mode here.

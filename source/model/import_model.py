@@ -587,6 +587,8 @@ class SUB_OP_select_individual_model(Operator):
         return {'FINISHED'}
 
 def import_model(operator: bpy.types.Operator, context: bpy.types.Context):
+    from ..anim.import_anim import save_visible_animation_folders
+    save_visible_animation_folders(context)
     ssp: SubSceneProperties = context.scene.sub_scene_properties
     dir = Path(ssp.model_import_folder_path)
     fallback_raw = ssp.get("sub_model_import_fallback", "") or ""
@@ -808,8 +810,14 @@ def import_model(operator: bpy.types.Operator, context: bpy.types.Context):
 
     if armature is not None:
         try:
-            from ..anim.import_anim import bind_anim_folder_to_armature
-            bind_anim_folder_to_armature(armature, ssp.animation_import_folder_path)
+            from ..anim.import_anim import (
+                bind_anim_folder_to_armature,
+                related_motion_folder,
+                sync_anim_importer_to_active,
+            )
+            exact_folder = related_motion_folder(str(dir))
+            bind_anim_folder_to_armature(armature, exact_folder)
+            sync_anim_importer_to_active(context, force=True, armature=armature)
         except Exception:
             pass
 

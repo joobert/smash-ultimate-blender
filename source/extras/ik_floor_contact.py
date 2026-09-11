@@ -66,6 +66,10 @@ def _empty(context, arm, name, size, visible=False):
     obj.hide_render = True
     obj.hide_select = not visible
     obj.show_in_front = True
+    # New helper collections must never flash all of their implementation
+    # empties into the viewport. The three editable markers are revealed only
+    # when Show Contact Markers is explicitly enabled.
+    obj.hide_set(True)
     return obj
 
 
@@ -115,11 +119,11 @@ class SUB_PG_floor_contact(PropertyGroup):
     adjust_body: BoolProperty(name='Adjust Body Height', default=False, update=_changed,
                              description='Allow vertical Trans correction to reach planted feet with stretch disabled')
     body_target: PointerProperty(type=bpy.types.Object)
-    show_markers: BoolProperty(name='Show Contact Markers', default=True, update=_visibility)
+    show_markers: BoolProperty(name='Show Contact Markers', default=False, update=_visibility)
     limbs: CollectionProperty(type=SUB_PG_floor_limb)
 
 
-def _point_defaults(arm, control, floor):
+def _point_defaults(arm, control, floor, toe_bone=None):
     """An editable starting guess, not a mesh-contact claim."""
     matrix = arm.matrix_world @ arm.pose.bones[control].matrix
     length = max(arm.data.bones[control].length, 0.1)
@@ -129,6 +133,10 @@ def _point_defaults(arm, control, floor):
         point = matrix @ Vector((0, length * distance, 0))
         point.z = floor
         points.append(tuple(inverse @ point))
+    if toe_bone and toe_bone in arm.pose.bones:
+        point = (arm.matrix_world @ arm.pose.bones[toe_bone].matrix).translation
+        point.z = floor
+        points[1] = tuple(inverse @ point)
     return points
 
 
@@ -160,7 +168,12 @@ def setup_limb(context, arm, control, kind, points=None):
     source = ik_channels.endpoint_target(arm, job[1], control) if job else control
     _copy(limb.raw, 'COPY_TRANSFORMS', 'IK Input', arm, source)
     _copy(limb.oriented, 'COPY_TRANSFORMS', 'IK Orientation', limb.raw)
-    points = points or _point_defaults(arm, control, context.scene.sub_floor_height)
+    toe_bone = None
+    if job and kind == 'LEGS':
+        controls = ik_channels.foot_controls(job[1], arm)
+        toe_bone = controls[3] if controls else None
+    points = points or _point_defaults(
+        arm, control, context.scene.sub_floor_height, toe_bone)
     for marker, point in zip((limb.heel, limb.toe), points):
         marker.parent = limb.oriented
         marker.matrix_parent_inverse = Matrix.Identity(4)
@@ -286,7 +299,7 @@ def rewire(arm):
             continue
         path = ik_channels.limb_path(arm, names)
         mid = arm.pose.bones.get(ik_channels.PREFIX + path[-2]) if len(path) >= 2 else None
-        end = arm.pose.bones.get(ik_channels.PREFIX + names[2])
+        end = arm.pose.bones.get(ik_channels.PREFIX + path[-1]) if path else None
         constraints = ([mid.constraints.get('SUB IK Solve')] if mid else [])
         constraints += ik_channels.end_constraints(end) if end else []
         for con in constraints:
@@ -296,6 +309,13 @@ def rewire(arm):
                     con.subtarget = ''
                 if con.type != 'IK':
                     con.target_space = con.owner_space = 'WORLD'
+        for name in path:
+            pull = arm.pose.bones.get(ik_channels.PULL_PREFIX + name)
+            con = pull.constraints.get(ik_channels.PULL_TARGET) if pull else None
+            if con:
+                con.target = limb.solved
+                con.subtarget = ''
+                con.target_space = con.owner_space = 'WORLD'
 
 
 def setup_body(context, arm):

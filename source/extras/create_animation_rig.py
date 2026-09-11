@@ -98,6 +98,19 @@ def canonical_bone_name(name):
     return _DUP_SUFFIX.sub('', name)
 
 
+def _connected_toe_side(bone):
+    """Return L/R for a connected toe descendant rooted at ToeL/ToeR."""
+    candidate = bone
+    while candidate is not None:
+        base = canonical_bone_name(candidate.name).lower()
+        if base in {'toel', 'toer'}:
+            return base[-1].upper() if 'toe' in canonical_bone_name(bone.name).lower() else None
+        if not getattr(candidate, 'use_connect', False):
+            break
+        candidate = candidate.parent
+    return None
+
+
 def bone_name_suffix(name):
     base = canonical_bone_name(name)
     if not name or name == base:
@@ -952,6 +965,9 @@ def armature_has_animation_rig(armature_obj):
 def armature_has_ik(armature_obj, limbs='BOTH'):
     if armature_obj is None or armature_obj.type != 'ARMATURE':
         return False
+    from .ik_channels import chains
+    if any(chains(armature_obj, limbs)):
+        return True
     for pose_bone in armature_obj.pose.bones:
         kind = _ik_limb_kind(pose_bone.name)
         if kind is None:
@@ -1490,10 +1506,14 @@ def _ik_driven_fk_bone_names(armature_obj, limbs='BOTH'):
     names = []
     for pose_bone in armature_obj.pose.bones:
         match = _SIDE_BONE.match(canonical_bone_name(pose_bone.name))
-        if not match or match.group(1) not in _IK_DRIVEN_FK_PARTS:
+        toe_side = _connected_toe_side(pose_bone.bone)
+        if match and match.group(1) in _IK_DRIVEN_FK_PARTS:
+            part = match.group(1)
+            kind = 'ARMS' if part in _IK_DRIVEN_FK_ARMS else 'LEGS'
+        elif toe_side:
+            kind = 'LEGS'
+        else:
             continue
-        part = match.group(1)
-        kind = 'ARMS' if part in _IK_DRIVEN_FK_ARMS else 'LEGS'
         if limbs != 'BOTH' and kind != limbs:
             continue
         names.append(pose_bone.name)
@@ -1543,7 +1563,7 @@ def _iter_armature_actions(armature_obj):
     return actions
 
 
-def _bone_ik_fk_role(bone_name):
+def _bone_ik_fk_role(bone_name, armature_obj=None):
     """Return ('fk'|'ik', 'ARMS'|'LEGS') or None for bones involved in the switch."""
     base = canonical_bone_name(bone_name)
     ik_match = _IK_BONE.match(base)
@@ -1554,6 +1574,9 @@ def _bone_ik_fk_role(bone_name):
     if fk_match and fk_match.group(1) in _IK_DRIVEN_FK_PARTS:
         part = fk_match.group(1)
         return 'fk', ('ARMS' if part in _IK_DRIVEN_FK_ARMS else 'LEGS')
+    bone = armature_obj.data.bones.get(bone_name) if armature_obj is not None else None
+    if bone is not None and _connected_toe_side(bone):
+        return 'fk', 'LEGS'
     return None
 
 
@@ -1859,7 +1882,7 @@ def _sync_ik_fk_fcurve_mutes(armature_obj):
             match = _POSE_FCURVE_BONE.match(path)
             if match is None:
                 continue
-            role = _bone_ik_fk_role(match.group(1))
+            role = _bone_ik_fk_role(match.group(1), armature_obj)
             if role is None:
                 continue
             # Never mute constraint / custom props (pole_angle, influence, …)
@@ -1967,7 +1990,7 @@ def unmute_all_ik_fk_fcurves(armature_obj):
             match = _POSE_FCURVE_BONE.match(fcurve.data_path or "")
             if match is None:
                 continue
-            if _bone_ik_fk_role(match.group(1)) is None:
+            if _bone_ik_fk_role(match.group(1), armature_obj) is None:
                 continue
             if fcurve.mute:
                 fcurve.mute = False
@@ -3488,6 +3511,9 @@ def _ensure_ik_drivers_on_loaded_rigs():
         if not (obj.data.get(ARMATURE_FLAG) or obj.data.get('sub_independent_ik')):
             continue
         if armature_has_ik(obj):
+            if obj.data.get('sub_independent_ik') and obj.name in bpy.context.view_layer.objects:
+                from .ik_channels import upgrade_pull_controls
+                upgrade_pull_controls(bpy.context, obj)
             _ensure_ik_influence_drivers(obj)
             _sync_ik_fk_fcurve_mutes(obj)
 
@@ -3503,10 +3529,18 @@ def _heal_widgets_once():
     return None
 
 
+def _update_stretch_chain(self, context):
+    for obj in bpy.data.objects:
+        if obj.type == 'ARMATURE' and obj.data == self:
+            obj.update_tag(refresh={'OBJECT'})
+
+
 def _unregister_ik_fk_props():
-    for cls in (bpy.types.Object, bpy.types.Armature):
+    for cls in (bpy.types.Object, bpy.types.Armature, bpy.types.Bone):
         for name in ("sub_use_ik", "sub_use_ik_arms", "sub_use_ik_legs",
-                     "sub_ik_stretch_arms", "sub_ik_stretch_legs"):
+                     "sub_ik_stretch_arms", "sub_ik_stretch_legs",
+                     "sub_ik_stretch_chain_arms", "sub_ik_stretch_chain_legs",
+                     "sub_ik_arm_pull"):
             if hasattr(cls, name):
                 try:
                     delattr(cls, name)
@@ -3516,11 +3550,27 @@ def _unregister_ik_fk_props():
 
 def register():
     _unregister_ik_fk_props()
+    bpy.types.Bone.sub_ik_arm_pull = bpy.props.FloatProperty(
+        name='ArmIK Pull',
+        description='Pull this arm chain toward its ArmIK control without scaling',
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+        options={'ANIMATABLE'},
+    )
     for kind in ('arms', 'legs'):
+        setattr(bpy.types.Armature, 'sub_ik_stretch_chain_' + kind, bpy.props.BoolProperty(
+            name='Stretch Chain',
+            description='Progressively pull bone positions toward the IK target without adding scale',
+            default=False,
+            update=_update_stretch_chain,
+        ))
         setattr(bpy.types.Armature, 'sub_ik_stretch_' + kind, bpy.props.BoolProperty(
             name='IK Stretch ' + kind.title(),
             description='Let hands or feet follow the IK target beyond limb reach',
             default=False,
+            update=_update_stretch_chain,
         ))
     bpy.types.Armature.sub_use_ik_arms = bpy.props.FloatProperty(
         name="Arms",

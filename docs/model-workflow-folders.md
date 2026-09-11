@@ -10,4 +10,6 @@ Model-specific destinations take priority over the global default. Matching uses
 
 The Idle Pose Library lists predefined poses available in the active animation folder. Changing that folder refreshes the entries immediately. Applying a predefined pose reads its first frame from that folder each time; it does not reuse data cached from a previous model or folder. Explicitly stored custom poses remain available across folder changes.
 
+Animation folder lists belong to each model's armature and are saved in the `.blend`. Importing `model/body/c80` discovers only the matching `motion/body/c80`; it does not silently substitute another costume. Adding or selecting an animation folder updates the active model's list. Selecting another armature—or one of its skinned meshes—restores that model's folders and selected folder. Missing folders remain recorded so temporarily unavailable paths are not lost.
+
 Validation: run `blender --background --factory-startup --python-exit-code 1 --python tests/workflow_settings.py` for Preferences registration, folder matching/fallback, idle folder changes, stepped stretch playback, and arms/legs/both IK creation. The IK creation fixture uses the real solver and matching code with isolated UI/state helpers. Run `tests/ik_stretch.py` with the same Blender flags for endpoint solver regression coverage.

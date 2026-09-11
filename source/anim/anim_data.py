@@ -159,14 +159,14 @@ def sync_sap_action_depsgraph_handler(scene, depsgraph):
     Alternative handler that runs on depsgraph updates.
     This catches more events including action changes.
     """
-    if not _sap_auto_sync_enabled:
-        return
-    sync_sap_action_handler(scene)
     try:
         from .import_anim import sync_anim_importer_to_active
         sync_anim_importer_to_active(bpy.context)
     except Exception:
         pass
+    if not _sap_auto_sync_enabled:
+        return
+    sync_sap_action_handler(scene)
     # Do NOT restyle visibility/eye F-Curves here. Writing RNA on every
     # depsgraph update (theme colors, bone palette, keyframe types) creates a
     # feedback loop that restarts EEVEE/Cycles viewport sampling forever.
@@ -353,6 +353,10 @@ class SUB_PT_sub_smush_anim_data_main(Panel):
     bl_context = "data"
     bl_options = {'DEFAULT_CLOSED'}
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
     @classmethod
     def poll(cls, context):
         if not context.object:
@@ -397,6 +401,10 @@ class SUB_PT_sub_smush_anim_data_vis_tracks(Panel):
     bl_options = {'DEFAULT_CLOSED'}
     bl_parent_id = SUB_PT_sub_smush_anim_data_main.bl_idname
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
     @classmethod
     def poll(cls, context):
         if not context.object:
@@ -440,6 +448,10 @@ class SUB_PT_sub_smush_anim_data_mat_tracks(Panel):
     bl_context = "data"
     bl_options = {'DEFAULT_CLOSED'}
     bl_parent_id = SUB_PT_sub_smush_anim_data_main.bl_idname
+
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
 
     @classmethod
     def poll(cls, context):
@@ -1392,6 +1404,8 @@ def cleanup_sap_auto_sync():
     unsubscribe_from_action_changes()
 
 def register():
+    from .import_anim import register_folder_sync
+    register_folder_sync()
     """Register only handlers and timers - classes are registered separately"""
     enabled = True
     try:
@@ -1430,6 +1444,8 @@ def register():
     """
 
 def unregister():
+    from .import_anim import unregister_folder_sync
+    unregister_folder_sync()
     """Unregister only handlers and timers - classes are unregistered separately"""
     set_sap_auto_sync_enabled(False)
     

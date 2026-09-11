@@ -5187,6 +5187,10 @@ class RENDER_PT_smash_viewport(bpy.types.Panel):
     bl_context = "render"
     COMPAT_ENGINES = {ENGINE_ID}
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
     @classmethod
     def poll(cls, context):
         return getattr(context, "engine", "") in cls.COMPAT_ENGINES

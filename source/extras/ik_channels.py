@@ -13,6 +13,7 @@ from mathutils import Matrix, Vector
 from . import pose_math
 
 PREFIX = 'BL_SUB_IK_'
+PULL_PREFIX = 'BL_SUB_IK_PULL_'
 OUTPUT = 'SUB IK Blend'
 VERSION = 'sub_independent_ik'
 MATCH_KEY = 'sub_ik_channel_matches'
@@ -20,19 +21,58 @@ END_ROTATION = 'SUB IK End Rotation'
 END_SCALE = 'SUB IK End Scale'
 END_LOCATION = 'SUB IK Stretch'
 TOE_OUTPUT = 'SUB IK Toe'
+PULL_TARGET = 'SUB IK Pull Target'
+PULL_END = 'SUB IK Pull End'
+ARM_PULL_PROPERTY = 'sub_ik_arm_pull'
 
 
-def foot_controls(names):
+def connected_toe_bones(obj, names):
+    """Connected toe hierarchy for a leg, rooted at ToeL/ToeR case-insensitively."""
+    foot = names[-1]
+    if not foot.startswith('Foot'):
+        return ()
+    wanted = ('Toe' + foot[4:]).lower()
+    root = next((bone for bone in obj.data.bones if bone.name.lower() == wanted), None)
+    if root is None:
+        return ()
+    result = [root.name]
+    pending = list(root.children)
+    while pending:
+        bone = pending.pop(0)
+        if not bone.use_connect:
+            continue
+        if 'toe' in bone.name.lower():
+            result.append(bone.name)
+        pending.extend(bone.children)
+    return tuple(result)
+
+
+def toe_pivot_name(obj, names):
+    """Choose the anatomical toe-base pivot without depending on exact casing."""
+    toe_names = connected_toe_bones(obj, names)
+    if not toe_names:
+        return None
+    for name in toe_names[1:]:
+        normalized = re.sub(r'[^a-z0-9]', '', name.lower())
+        if 'basetoe' in normalized or 'toebase' in normalized:
+            return name
+    return toe_names[0]
+
+
+def foot_controls(names, obj=None):
     """Reverse-foot controls for a leg chain, or ``None`` for an arm."""
-    foot = names[2]
+    foot = names[-1]
     if not foot.startswith('Foot'):
         return None
     suffix = foot[4:]
-    return 'FootRollIK' + suffix, 'ToeIK' + suffix, PREFIX + 'FootTarget' + suffix, 'Toe' + suffix
+    toe_name = 'Toe' + suffix
+    if obj is not None:
+        toe_name = toe_pivot_name(obj, names) or toe_name
+    return 'FootRollIK' + suffix, 'ToeIK' + suffix, PREFIX + 'FootTarget' + suffix, toe_name
 
 
 def endpoint_target(obj, names, fallback):
-    controls = foot_controls(names)
+    controls = foot_controls(names, obj)
     return controls[2] if controls and controls[2] in obj.pose.bones else fallback
 
 
@@ -46,7 +86,7 @@ def wire_end_controls(obj):
     from .create_animation_rig import _ensure_constraint_influence_driver
     for kind, names, target, _ in chains(obj):
         endpoint = endpoint_target(obj, names, target)
-        end = obj.pose.bones.get(PREFIX + names[2])
+        end = obj.pose.bones.get(PREFIX + names[-1])
         if end is None:
             continue
         for con in list(end.constraints):
@@ -64,8 +104,7 @@ def wire_end_controls(obj):
             con.target = obj
             con.subtarget = endpoint
             if name == END_LOCATION:
-                _ensure_constraint_influence_driver(
-                    obj, end, con, 'sub_ik_stretch_' + kind.lower())
+                _endpoint_stretch_driver(obj, con, kind)
 
 
 def limb_path(obj, names):
@@ -81,16 +120,67 @@ def limb_path(obj, names):
     return ()
 
 
+def chain_path(obj, root, end, middle=None):
+    """Return the parent path from root to end, optionally through middle."""
+    path = []
+    bone = obj.data.bones.get(end)
+    while bone is not None:
+        path.append(bone.name)
+        if bone.name == root:
+            path.reverse()
+            if len(path) >= 3 and (middle is None or middle in path[1:-1]):
+                return tuple(path)
+            return ()
+        bone = bone.parent
+    return ()
+
+
+def custom_jobs(obj):
+    try:
+        records = json.loads(obj.get('sub_custom_ik_chains', '[]'))
+    except (ValueError, TypeError):
+        return
+    for record in records:
+        try:
+            names = chain_path(obj, record['root'], record['end'], record['middle'])
+            job = record['kind'], names, record['target'], record['pole']
+        except (KeyError, TypeError):
+            continue
+        if names:
+            yield job
+
+
+def bend_name(obj, names):
+    try:
+        records = json.loads(obj.get('sub_custom_ik_chains', '[]'))
+    except (ValueError, TypeError):
+        records = []
+    for record in records:
+        if record.get('root') == names[0] and record.get('end') == names[-1]:
+            return record.get('middle', names[len(names) // 2])
+    match = re.fullmatch(r'(Leg|Shoulder)([LR]\d*(?:\.\d{3})*)', names[0])
+    if match:
+        candidate = ('Knee' if match[1] == 'Leg' else 'Arm') + match[2]
+        if candidate in names:
+            return candidate
+    return names[len(names) // 2]
+
+
+def arm_pull_value(obj, pole):
+    pole_bone = obj.pose.bones.get(pole)
+    return float(getattr(pole_bone.bone, ARM_PULL_PROPERTY, 0.0)) if pole_bone else 0.0
+
+
 def solve_bone(obj, names):
     return obj.pose.bones[PREFIX + limb_path(obj, names)[-2]]
 
 
-def create_controls(context, obj, limbs='BOTH'):
+def create_controls(context, obj, limbs='BOTH', custom_only=False):
     """One idempotent creation path for IK Tools and the Animation Rig."""
     from . import create_animation_rig as rig, anim_layers_compat
     rig._activate_armature(context, obj)
     jobs = []
-    for b in obj.data.bones:
+    for b in (() if custom_only else obj.data.bones):
         bone_match = re.fullmatch(r'(Leg|Shoulder)([LR]\d*(?:\.\d{3})*)', b.name)
         if not bone_match:
             continue
@@ -102,6 +192,7 @@ def create_controls(context, obj, limbs='BOTH'):
         if all(n in obj.data.bones for n in names) and limb_path(obj, names):
             jobs.append((kind, names, ('FootIK' if kind == 'LEGS' else 'HandIK') + suffix,
                          ('KneeIK' if kind == 'LEGS' else 'ArmIK') + suffix))
+    jobs.extend(job for job in custom_jobs(obj) if limbs in (job[0], 'BOTH'))
     # Existing controls may have user-authored dependencies or animation. Only
     # freshly generated controls are eligible for the independent fast path.
     fresh_controls = all(
@@ -113,7 +204,7 @@ def create_controls(context, obj, limbs='BOTH'):
         bpy.ops.object.mode_set(mode='EDIT')
         bones = obj.data.edit_bones
         for _, names, target, pole in jobs:
-            root, mid, end = [bones[n] for n in names]
+            root, mid, end = [bones[n] for n in (names[0], bend_name(obj, names), names[-1])]
             if target not in bones:
                 control = bones.new(target)
                 control.matrix = end.matrix.copy()
@@ -185,6 +276,9 @@ def chains(obj, limbs='BOTH'):
                 names = (c['shoulder'].name, c['arm'].name, c['hand'].name)
                 if limb_path(obj, names):
                     yield 'ARMS', names, c['hand_ik'].name, c['arm_ik'].name
+    for job in custom_jobs(obj):
+        if limbs in (job[0], 'BOTH') and all(name in obj.pose.bones for name in job[2:]):
+            yield job
 
 
 def outputs(obj, limbs='BOTH'):
@@ -198,7 +292,7 @@ def outputs(obj, limbs='BOTH'):
 
 def toe_outputs(obj, limbs='BOTH'):
     for kind, names, _target, _pole in chains(obj, limbs):
-        controls = foot_controls(names) if kind == 'LEGS' else None
+        controls = foot_controls(names, obj) if kind == 'LEGS' else None
         toe = obj.pose.bones.get(controls[3]) if controls else None
         con = toe.constraints.get(TOE_OUTPUT) if toe else None
         if con:
@@ -211,8 +305,11 @@ def ensure(obj, context, limbs='BOTH'):
     if not jobs:
         return
     fresh = [j for j in jobs if any(PREFIX + n not in obj.data.bones for n in limb_path(obj, j[1]))]
-    reverse_feet = [j for j in jobs if j[0] == 'LEGS' and foot_controls(j[1])[3] in obj.data.bones]
-    missing_reverse = [j for j in reverse_feet if any(n not in obj.data.bones for n in foot_controls(j[1])[:3])]
+    reverse_feet = [j for j in jobs
+                    if j[0] == 'LEGS' and foot_controls(j[1], obj)
+                    and foot_controls(j[1], obj)[3] in obj.data.bones]
+    missing_reverse = [j for j in reverse_feet
+                       if any(n not in obj.data.bones for n in foot_controls(j[1], obj)[:3])]
     if fresh or missing_reverse:
         # Heal the old rest-hold workaround once, before installing independent chains.
         rig._clear_fk_rest_hold(obj)
@@ -242,7 +339,7 @@ def ensure(obj, context, limbs='BOTH'):
                 control.use_connect = False
                 control.matrix = matrix
         for _kind, names, target, _pole in missing_reverse:
-            roll_name, toe_name, output_name, original_toe = foot_controls(names)
+            roll_name, toe_name, output_name, original_toe = foot_controls(names, obj)
             foot = bones[target]
             toe = bones[original_toe]
             roll = bones.get(roll_name) or bones.new(roll_name)
@@ -302,7 +399,7 @@ def ensure(obj, context, limbs='BOTH'):
             con.iterations = 200
         controls_collection = obj.data.collections.get('IK Bones') or obj.data.collections.new('IK Bones')
         for _kind, names, _target, _pole in reverse_feet:
-            roll_name, toe_name, output_name, original_toe = foot_controls(names)
+            roll_name, toe_name, output_name, original_toe = foot_controls(names, obj)
             if output_name not in obj.pose.bones:
                 continue
             collection.assign(obj.data.bones[output_name])
@@ -325,7 +422,27 @@ def ensure(obj, context, limbs='BOTH'):
             solve = mid.constraints.get('SUB IK Solve')
             if solve and solve.target == obj:
                 solve.subtarget = output_name
-    obj.data[VERSION] = 2
+    paths = {name for _, names, _, _ in jobs for name in limb_path(obj, names)}
+    missing_pull = [name for name in paths if PULL_PREFIX + name not in obj.data.bones]
+    if missing_pull:
+        bpy.ops.object.mode_set(mode='EDIT')
+        bones = obj.data.edit_bones
+        # Connected heads cannot translate. Parenting and rest transforms stay
+        # intact, but the generated positional output must be allowed to move.
+        for name in paths:
+            bones[name].use_connect = False
+        for name in missing_pull:
+            src = bones[name]
+            dst = bones.new(PULL_PREFIX + name)
+            dst.matrix = src.matrix.copy()
+            dst.length = src.length
+            dst.use_deform = False
+        bpy.ops.object.mode_set(mode='POSE')
+        collection = obj.data.collections.get('IK Internal') or obj.data.collections.new('IK Internal')
+        collection.is_visible = False
+        for name in missing_pull:
+            collection.assign(obj.data.bones[PULL_PREFIX + name])
+    obj.data[VERSION] = 3
     wire(obj)
     from . import ik_floor_contact
     ik_floor_contact.restore_pending(context, obj)
@@ -335,11 +452,187 @@ def ensure(obj, context, limbs='BOTH'):
 def wire(obj):
     from .create_animation_rig import _ensure_constraint_influence_driver, _limb_switch_prop
     wire_end_controls(obj)
-    for pb, con, kind in outputs(obj):
-        _ensure_constraint_influence_driver(obj, pb, con, _limb_switch_prop(kind))
-        con.mute = False
+    for kind, names, target, pole in chains(obj):
+        path = limb_path(obj, names)
+        for name in path[:-1]:
+            solver = obj.pose.bones.get(PREFIX + name)
+            if solver:
+                solver.driver_remove('ik_stretch')
+                solver.ik_stretch = 0.0
+        solver = solve_bone(obj, names)
+        solve = solver.constraints.get('SUB IK Solve') if solver else None
+        if solve:
+            solve.use_stretch = False
+        distances = [0.0]
+        for first, second in zip(path, path[1:]):
+            distances.append(distances[-1] + (
+                obj.data.bones[second].head_local - obj.data.bones[first].head_local).length)
+        for index, name in enumerate(path):
+            source = obj.pose.bones[name]
+            pull = obj.pose.bones.get(PULL_PREFIX + name)
+            blend = source.constraints.get(OUTPUT)
+            if pull is None or blend is None:
+                continue
+            base = pull.constraints.get('SUB IK Pull Base') or pull.constraints.new('COPY_TRANSFORMS')
+            base.name = 'SUB IK Pull Base'
+            base.target, base.subtarget = obj, PREFIX + name
+            base.target_space = base.owner_space = 'POSE'
+            blend.subtarget = pull.name
+            _ensure_constraint_influence_driver(obj, source, blend, _limb_switch_prop(kind))
+            blend.mute = False
+            weight = distances[index] / distances[-1] if distances[-1] > 1e-8 else index / (len(path) - 1)
+            for label, subtarget, sign in (
+                    (PULL_TARGET, endpoint_target(obj, names, target), 1.0),
+                    (PULL_END, PREFIX + path[-1], -1.0)):
+                con = pull.constraints.get(label) or pull.constraints.new('TRANSFORM')
+                con.name = label
+                con.target, con.subtarget = obj, subtarget
+                con.target_space = con.owner_space = 'POSE'
+                con.map_from = con.map_to = 'LOCATION'
+                con.mix_mode = 'ADD'
+                con.use_motion_extrapolate = True
+                for axis in 'xyz':
+                    setattr(con, 'from_min_' + axis, 0.0)
+                    setattr(con, 'from_max_' + axis, 1.0)
+                    setattr(con, 'to_min_' + axis, 0.0)
+                    setattr(con, 'to_max_' + axis, sign * weight)
+                _stretch_chain_driver(obj, con, kind, index == len(path) - 1)
+                con.mute = False
+    wire_arm_pulls(obj)
     from . import ik_floor_contact
     ik_floor_contact.rewire(obj)
+
+
+def _stretch_chain_driver(obj, constraint, kind, endpoint):
+    driver = constraint.driver_add('influence').driver
+    driver.type = 'SCRIPTED'
+    for variable in list(driver.variables):
+        driver.variables.remove(variable)
+    props = [('stretch', 'sub_ik_stretch_' + kind.lower())]
+    chain_prop = 'sub_ik_stretch_chain_' + kind.lower()
+    if hasattr(obj.data, chain_prop):
+        props.append(('chain', chain_prop))
+    for variable_name, prop in props:
+        variable = driver.variables.new()
+        variable.name, variable.type = variable_name, 'SINGLE_PROP'
+        variable.targets[0].id_type = 'ARMATURE'
+        variable.targets[0].id = obj.data
+        variable.targets[0].data_path = prop
+    driver.expression = 'stretch' if endpoint else (
+        'stretch * chain' if len(props) == 2 else '0')
+
+
+def _endpoint_stretch_driver(obj, constraint, kind):
+    """Keep endpoint-only stretch active when full-chain stretch is off."""
+    driver = constraint.driver_add('influence').driver
+    driver.type = 'SCRIPTED'
+    for variable in list(driver.variables):
+        driver.variables.remove(variable)
+    props = [('stretch', 'sub_ik_stretch_' + kind.lower())]
+    chain_prop = 'sub_ik_stretch_chain_' + kind.lower()
+    if hasattr(obj.data, chain_prop):
+        props.append(('chain', chain_prop))
+    for variable_name, prop in props:
+        variable = driver.variables.new()
+        variable.name, variable.type = variable_name, 'SINGLE_PROP'
+        variable.targets[0].id_type = 'ARMATURE'
+        variable.targets[0].id = obj.data
+        variable.targets[0].data_path = prop
+    driver.expression = 'stretch * (1-chain)' if len(props) == 2 else 'stretch'
+
+
+def _arm_pull_driver(obj, constraint, pole):
+    driver = constraint.driver_add('influence').driver
+    driver.type = 'SCRIPTED'
+    for variable in list(driver.variables):
+        driver.variables.remove(variable)
+    for variable_name, id_type, target_id, data_path in (
+            ('pull', 'ARMATURE', obj.data,
+             obj.data.bones[pole].path_from_id() + '.' + ARM_PULL_PROPERTY),
+            ('stretch', 'ARMATURE', obj.data, 'sub_ik_stretch_arms'),
+            ('chain', 'ARMATURE', obj.data, 'sub_ik_stretch_chain_arms')):
+        variable = driver.variables.new()
+        variable.name, variable.type = variable_name, 'SINGLE_PROP'
+        variable.targets[0].id_type = id_type
+        variable.targets[0].id = target_id
+        variable.targets[0].data_path = data_path
+    driver.expression = 'pull * stretch * chain'
+
+
+def wire_arm_pulls(obj):
+    """Distribute each arm pole's independently controlled positional pull."""
+    for _kind, names, target, pole in chains(obj, 'ARMS'):
+        path = limb_path(obj, names)
+        middle = bend_name(obj, names)
+        if middle not in path or pole not in obj.pose.bones:
+            continue
+        bend_index = path.index(middle)
+        distances = [0.0]
+        for first, second in zip(path, path[1:]):
+            distances.append(distances[-1] + (
+                obj.data.bones[second].head_local - obj.data.bones[first].head_local).length)
+        total, bend_distance = distances[-1], distances[bend_index]
+        bend_fraction = bend_distance / total if total > 1e-8 else bend_index / (len(path) - 1)
+        for index, name in enumerate(path):
+            pull = obj.pose.bones.get(PULL_PREFIX + name)
+            if pull is None:
+                continue
+            if index <= bend_index:
+                u = distances[index] / bend_distance if bend_distance > 1e-8 else index / max(bend_index, 1)
+            else:
+                span = total - bend_distance
+                u = (total - distances[index]) / span if span > 1e-8 else 0.0
+            weight = u * u * (3.0 - 2.0 * u)
+            terms = (
+                ('Pole', pole, weight),
+                ('Bend', PREFIX + middle, -weight),
+                ('Hand', endpoint_target(obj, names, target), -weight * bend_fraction),
+                ('End', PREFIX + path[-1], weight * bend_fraction),
+            )
+            for suffix, subtarget, factor in terms:
+                label = 'SUB IK Arm Pull ' + suffix
+                con = pull.constraints.get(label) or pull.constraints.new('TRANSFORM')
+                con.name = label
+                con.target, con.subtarget = obj, subtarget
+                con.target_space = con.owner_space = 'POSE'
+                con.map_from = con.map_to = 'LOCATION'
+                con.mix_mode = 'ADD'
+                con.use_motion_extrapolate = True
+                for axis in 'xyz':
+                    setattr(con, 'from_min_' + axis, 0.0)
+                    setattr(con, 'from_max_' + axis, 1.0)
+                    setattr(con, 'to_min_' + axis, 0.0)
+                    setattr(con, 'to_max_' + axis, factor)
+                _arm_pull_driver(obj, con, pole)
+                con.mute = False
+
+
+def upgrade_pull_controls(context, obj):
+    """Add positional outputs to saved rigs without rematching their keys."""
+    jobs = list(chains(obj))
+    if not any(PULL_PREFIX + name not in obj.data.bones
+               for _, names, _, _ in jobs for name in limb_path(obj, names)):
+        wire(obj)
+        return
+    from . import create_animation_rig as rig
+    active = context.view_layer.objects.active
+    selected = list(context.selected_objects)
+    mode = active.mode if active else 'OBJECT'
+    try:
+        if active and mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        rig._activate_armature(context, obj)
+        ensure(obj, context)
+    finally:
+        if context.object and context.object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        for item in context.selected_objects:
+            item.select_set(False)
+        for item in selected:
+            item.select_set(True)
+        context.view_layer.objects.active = active
+        if active and mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode=mode)
 
 
 def _key(pb, frame, previous):
@@ -378,7 +671,7 @@ def clean_animation(obj, limbs='BOTH', tolerance=1e-4):
         names.update(limb_path(obj, group))
         names.update(PREFIX + n for n in limb_path(obj, group))
         names.update((target, pole))
-        controls = foot_controls(group)
+        controls = foot_controls(group, obj)
         if controls:
             names.update(controls[:3])
     paths = {obj.pose.bones[n].path_from_id() for n in names if n in obj.pose.bones}
@@ -558,7 +851,7 @@ def _chain_cache(obj, jobs):
             # outside the limb and so needs sampling as a placement reference.
             'parent': parent.name if parent is not None else None,
             'angle': None,
-            'foot': foot_controls(names),
+            'foot': foot_controls(names, obj),
         }
     return cache
 
@@ -586,9 +879,9 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
     """
     kind, names, target, pole = job
     path = entry['path']
-    solver = [obj.pose.bones[PREFIX + name] for name in names]
+    solver = [obj.pose.bones[PREFIX + name] for name in path]
     con = solve_bone(obj, names).constraints['SUB IK Solve']
-    endpoints = end_constraints(solver[2])
+    endpoints = end_constraints(solver[-1])
 
     # Place the solver seed. Every target matrix is already sampled, so these
     # are basis writes with nothing to evaluate between them. A bone pose_math
@@ -611,7 +904,8 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
         for name in path:
             writer.stash_pose_bone(obj.pose.bones[PREFIX + name], frame)
 
-    root, mid, end = [matrices[n].translation for n in names]
+    middle = bend_name(obj, names)
+    root, mid, end = [matrices[n].translation for n in (path[0], middle, path[-1])]
     axis = end - root
     if axis.length < 1e-8:
         axis = matrices[names[0]].to_3x3().col[1].normalized()
@@ -628,8 +922,8 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
 
     control = obj.pose.bones[target]
     control.rotation_mode = 'QUATERNION'
-    if not pose_math.apply_world(control, matrices[names[2]], None):
-        control.matrix = matrices[names[2]]
+    if not pose_math.apply_world(control, matrices[path[-1]], None):
+        control.matrix = matrices[path[-1]]
         yield
 
     foot = entry.get('foot')
@@ -637,7 +931,7 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
         roll_pb = obj.pose.bones[foot[0]]
         roll_pb.matrix_basis = Matrix.Identity(4)
         toe_pb = obj.pose.bones[foot[1]]
-        if not pose_math.apply_world(toe_pb, matrices[foot[3]], matrices[names[2]]):
+        if not pose_math.apply_world(toe_pb, matrices[foot[3]], matrices[path[-1]]):
             toe_pb.matrix = matrices[foot[3]]
             yield
 
@@ -648,7 +942,11 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
         yield
         current = pole_pb.matrix.copy()
     placed = current.copy()
-    placed.translation = mid + bend * max((mid-root).length + (end-mid).length, 0.5)
+    if kind == 'ARMS' and arm_pull_value(obj, pole) > 0.0 \
+            and obj.data.sub_ik_stretch_arms and obj.data.sub_ik_stretch_chain_arms:
+        placed.translation = mid
+    else:
+        placed.translation = mid + bend * max((mid-root).length + (end-mid).length, 0.5)
     if not pose_math.apply_world(pole_pb, placed, None):
         pole_pb.matrix = placed
         yield
@@ -664,7 +962,10 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
             return errors[angle]
         con.pole_angle = math.atan2(math.sin(angle), math.cos(angle))
         yield
-        score = sum(sum((solver[j].matrix.col[i]-matrices[names[j]].col[i]).length_squared for i in range(4)) for j in (0, 1))
+        score = sum(
+            sum((solver[j].matrix.col[i] - matrices[path[j]].col[i]).length_squared
+                for i in range(4))
+            for j in range(len(path) - 1))
         errors[angle] = score
         return score
     def best(candidates):
@@ -676,7 +977,8 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
     con.pole_angle = 0.0
     yield
     # Angle from the zero-angle solve to the desired bend plane.
-    delta = _angle(solver[1].matrix.translation-root, mid-root, axis)
+    bend_index = path.index(middle)
+    delta = _angle(solver[bend_index].matrix.translation-root, mid-root, axis)
     if (mid-root-axis*(mid-root).dot(axis)).length < 1e-5:
         delta = _angle(solver[0].matrix.to_3x3().col[0], matrices[names[0]].to_3x3().col[0], axis)
     angle = yield from best([delta, -delta, entry['angle'] or 0.0])
@@ -729,7 +1031,7 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
             writer.stash_pose_bone(obj.pose.bones[foot[0]], frame)
             writer.stash_pose_bone(obj.pose.bones[foot[1]], frame)
         writer.stash_channel(con.path_from_id() + '.pole_angle', 0, frame,
-                             con.pole_angle, solver[1].name)
+                             con.pole_angle, solver[-2].name)
 
 
 def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch=False):
@@ -823,7 +1125,8 @@ def bake(context, obj, names, start, end, clear_constraints=True):
     from . import create_animation_rig as rig, anim_layers_compat
     from . import ik_floor_contact
     from ..anim.fcurve_bulk import PoseKeyWriter
-    names = [n for n in names if n in obj.pose.bones and not n.startswith(PREFIX)]
+    names = [n for n in names if n in obj.pose.bones
+             and not n.startswith((PREFIX, PULL_PREFIX))]
     root = obj.pose.bones.get('Trans')
     body = root.constraints.get(ik_floor_contact.BODY_CONSTRAINT) if root else None
     if body and any(kind == 'LEGS' and any(n in names for n in group)
@@ -901,10 +1204,13 @@ def remove(context, obj, limbs='BOTH'):
     jobs = list(chains(obj, limbs))
     from . import ik_floor_contact
     ik_floor_contact.remove(context, obj, controls={job[2] for job in jobs})
-    names = {PREFIX+n for _, group, _, _ in jobs for n in group}
+    names = {prefix + name
+             for _, group, _, _ in jobs
+             for name in limb_path(obj, group)
+             for prefix in (PREFIX, PULL_PREFIX)}
     names.update(n for _, _, target, pole in jobs for n in (target, pole))
     for kind, group, _, _ in jobs:
-        controls = foot_controls(group) if kind == 'LEGS' else None
+        controls = foot_controls(group, obj) if kind == 'LEGS' else None
         if controls:
             names.update(controls[:3])
             toe = obj.pose.bones.get(controls[3])
@@ -915,6 +1221,16 @@ def remove(context, obj, limbs='BOTH'):
     for pb, con, _ in list(outputs(obj, limbs)):
         con.driver_remove('influence')
         pb.constraints.remove(con)
+    for name in names:
+        pull = obj.pose.bones.get(name) if name.startswith(PULL_PREFIX) else None
+        if pull:
+            for constraint in list(pull.constraints):
+                constraint.driver_remove('influence')
+                pull.constraints.remove(constraint)
+        solver = obj.pose.bones.get(name) if name.startswith(PREFIX) else None
+        if solver:
+            for constraint in solver.constraints:
+                constraint.driver_remove('influence')
     paths = tuple(obj.pose.bones[n].path_from_id() + '.' for n in names if n in obj.pose.bones)
     for action in rig._iter_armature_actions(obj):
         for fc in list(get_all_action_fcurves(action, id_type='OBJECT')):
@@ -933,4 +1249,10 @@ def remove(context, obj, limbs='BOTH'):
                 setattr(obj.data, rig._limb_switch_prop(kind), 0.0)
     finally:
         rig._IK_FK_APPLYING = False
+    try:
+        records = json.loads(obj.get('sub_custom_ik_chains', '[]'))
+    except (ValueError, TypeError):
+        records = []
+    obj['sub_custom_ik_chains'] = json.dumps(
+        [record for record in records if limbs not in (record.get('kind'), 'BOTH')])
     return list(names)

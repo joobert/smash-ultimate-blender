@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 
 ANIM_FOLDER_KEY = "sub_anim_import_folder"
 _last_anim_sync_ptr = 0
+_anim_sync_busy = False
 
 
 def remember_animation_folder(ssp, folder):
@@ -79,13 +80,40 @@ def fill_animation_import_list(ssp, folder):
     return count
 
 
-def bind_anim_folder_to_armature(armature, folder):
-    if armature is None or not folder:
+def active_import_armature(context):
+    obj = context.view_layer.objects.active
+    if obj and obj.type == 'ARMATURE':
+        return obj
+    if obj and obj.type == 'MESH':
+        return obj.find_armature()
+    return None
+
+
+def related_motion_folder(model):
+    parts = list(Path(model).parts)
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index].lower() == 'model':
+            parts[index] = 'motion'
+            folder = str(Path(*parts))
+            return folder if os.path.isdir(folder) else ''
+    return ''
+
+
+def bind_anim_folder_to_armature(armature, folder, ssp=None):
+    if armature is None:
         return
     try:
-        armature[ANIM_FOLDER_KEY] = folder
-        if armature.data is not None:
-            armature.data[ANIM_FOLDER_KEY] = folder
+        armature[ANIM_FOLDER_KEY] = folder or ''
+        if ssp is not None:
+            paths = [item.path for item in ssp.animation_import_folders]
+        else:
+            try:
+                paths = list(json.loads(armature.get('sub_anim_import_folders', '[]')))
+            except (TypeError, ValueError):
+                paths = []
+        if folder and folder not in paths:
+            paths.append(folder)
+        armature['sub_anim_import_folders'] = json.dumps(paths)
     except Exception:
         pass
 
@@ -104,53 +132,79 @@ def anim_folder_for_armature(armature):
     smash = armature.get("sub_smash_model_folder", "") or ""
     if data is not None and not smash:
         smash = data.get("sub_smash_model_folder", "") or ""
-    if smash:
-        motion = smash.replace("model", "motion")
-        if os.path.isdir(motion):
-            nuanmb = [name for name in os.listdir(motion) if name.endswith(".nuanmb")]
-            if nuanmb:
-                return motion
-            body = Path(motion) / "body" if os.path.basename(motion) != "body" else Path(motion)
-            if not str(body).endswith("body"):
-                fighter = Path(smash).parent.parent.parent
-                body = fighter / "motion" / "body"
-            if body.is_dir():
-                subs = [name for name in os.listdir(body) if os.path.isdir(body / name)]
-                if subs:
-                    return str(body / subs[0])
-    return ""
+    return related_motion_folder(smash) if smash else ""
 
 
-def sync_anim_importer_to_active(context=None):
-    global _last_anim_sync_ptr
+def save_visible_animation_folders(context):
+    owner = getattr(context.scene, 'sub_anim_folder_owner', None)
+    ssp = getattr(context.scene, 'sub_scene_properties', None)
+    if owner is not None and ssp is not None:
+        bind_anim_folder_to_armature(owner, ssp.animation_import_folder_path, ssp)
+
+
+def sync_anim_importer_to_active(context=None, force=False, armature=None):
+    global _last_anim_sync_ptr, _anim_sync_busy
     context = context or bpy.context
-    obj = getattr(context, "object", None)
-    if obj is None or getattr(obj, "type", "") != "ARMATURE":
+    obj = armature if armature is not None else active_import_armature(context)
+    if obj is None or _anim_sync_busy:
         return
     try:
         ptr = int(obj.as_pointer())
     except Exception:
         ptr = 0
-    if ptr == _last_anim_sync_ptr:
+    scene = context.scene
+    key = (int(scene.as_pointer()), ptr)
+    if key == _last_anim_sync_ptr and not force and scene.sub_anim_folder_owner == obj:
         return
-    folder = anim_folder_for_armature(obj)
-    if not folder:
-        _last_anim_sync_ptr = ptr
-        return
-    ssp = getattr(getattr(context, "scene", None), "sub_scene_properties", None)
+    ssp = getattr(scene, "sub_scene_properties", None)
     if ssp is None:
         return
-    current = getattr(ssp, "animation_import_folder_path", "") or ""
-    if os.path.normcase(os.path.normpath(current)) == os.path.normcase(os.path.normpath(folder)):
-        _last_anim_sync_ptr = ptr
-        return
-    fill_animation_import_list(ssp, folder)
     try:
-        from .raw_anim import refresh_raw_animation_import_list
+        _anim_sync_busy = True
+        if scene.sub_anim_folder_owner != obj:
+            save_visible_animation_folders(context)
+        folder = anim_folder_for_armature(obj)
+        try:
+            paths = json.loads(obj.get('sub_anim_import_folders', '[]'))
+        except (TypeError, ValueError):
+            paths = []
+        scene.sub_anim_folder_owner = None
+        ssp.animation_import_folders.clear()
+        ssp.animation_import_folder_path = ''
+        for path in paths:
+            remember_animation_folder(ssp, path)
+        fill_animation_import_list(ssp, folder)
+        ssp.raw_animation_import_folder_path = ''
         refresh_raw_animation_import_list(ssp)
-    except Exception:
+        scene.sub_anim_folder_owner = obj
+        _last_anim_sync_ptr = key
+        for area in context.screen.areas if context.screen else ():
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+    finally:
+        _anim_sync_busy = False
+
+
+def animation_folder_selection_timer():
+    try:
+        if bpy.context.mode in {'OBJECT', 'POSE'}:
+            sync_anim_importer_to_active()
+    except (ReferenceError, RuntimeError, AttributeError):
         pass
-    _last_anim_sync_ptr = ptr
+    return 0.2
+
+
+def register_folder_sync():
+    bpy.types.Scene.sub_anim_folder_owner = bpy.props.PointerProperty(type=bpy.types.Object)
+    if not bpy.app.timers.is_registered(animation_folder_selection_timer):
+        bpy.app.timers.register(animation_folder_selection_timer, persistent=True)
+
+
+def unregister_folder_sync():
+    if bpy.app.timers.is_registered(animation_folder_selection_timer):
+        bpy.app.timers.unregister(animation_folder_selection_timer)
+    if hasattr(bpy.types.Scene, 'sub_anim_folder_owner'):
+        del bpy.types.Scene.sub_anim_folder_owner
 
 
 def import_animation_file(
@@ -2053,11 +2107,10 @@ class SUB_OP_switch_animation_folder(Operator):
     folder: StringProperty(subtype='DIR_PATH')
 
     def execute(self, context):
+        sync_anim_importer_to_active(context)
         ssp = context.scene.sub_scene_properties
         fill_animation_import_list(ssp, self.folder)
-        obj = context.object
-        if obj is not None and obj.type == 'ARMATURE':
-            bind_anim_folder_to_armature(obj, self.folder)
+        bind_anim_folder_to_armature(active_import_armature(context), self.folder, ssp)
         return {'FINISHED'}
 
 
@@ -2076,6 +2129,7 @@ class SUB_OP_select_animation_folder(Operator):
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
+        sync_anim_importer_to_active(context)
         ssp = context.scene.sub_scene_properties
         folder = os.path.normpath(bpy.path.abspath(self.directory))
         if not os.path.isdir(folder):
@@ -2091,9 +2145,8 @@ class SUB_OP_select_animation_folder(Operator):
             remember_animation_folder(ssp, path)
         count = fill_animation_import_list(ssp, folders[0] if folders else folder)
         refresh_raw_animation_import_list(ssp)
-        obj = context.object
-        if obj is not None and obj.type == 'ARMATURE':
-            bind_anim_folder_to_armature(obj, ssp.animation_import_folder_path)
+        bind_anim_folder_to_armature(
+            active_import_armature(context), ssp.animation_import_folder_path, ssp)
         self.report({'INFO'}, f'Added {len(folders) or 1} folder(s); {count} animations in selected folder')
         return {'FINISHED'}
 

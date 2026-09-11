@@ -39,10 +39,10 @@ class SUB_PT_ik_animation_tools(Panel):
         from .create_animation_rig import find_target_armature
         arm = find_target_armature(context)
         if arm and arm.data.get('sub_independent_ik'):
-            row = box.row(align=True)
-            row.label(text='Stretch')
-            row.prop(arm.data, 'sub_ik_stretch_arms', text='Arms')
-            row.prop(arm.data, 'sub_ik_stretch_legs', text='Legs')
+            from .anim_rig_extras import _draw_ik_stretch_rows
+            stretch_box = box.box()
+            stretch_box.label(text='Independent IK')
+            _draw_ik_stretch_rows(stretch_box, arm)
 
         # Setup is used less often than posing; keep it out of the daily workflow.
         header, setup = layout.panel("sub_ik_setup", default_closed=True)
@@ -53,6 +53,8 @@ class SUB_PT_ik_animation_tools(Panel):
             row = col.row(align=True)
             row.operator("sub.create_arm_ik", text="Arms Only")
             row.operator("sub.create_foot_ik", text="Legs Only")
+            from . import custom_ik
+            custom_ik.draw(setup, context, arm)
 
         # Animation Tools section
         from . import ik_floor_contact

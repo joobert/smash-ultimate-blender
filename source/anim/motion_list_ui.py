@@ -304,6 +304,10 @@ class SUB_PT_motion_list(bpy.types.Panel):
     bl_options = {'DEFAULT_CLOSED'}
     bl_parent_id = 'SUB_PT_sub_smush_anim_data_main'
 
+    def draw_header_preset(self, context):
+        from ..ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
+
     @classmethod
     def poll(cls, context):
         return context.object is not None and context.object.type == 'ARMATURE'

@@ -11,6 +11,10 @@ class MaterialPanel(Panel):
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "material"
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
     
     @classmethod
     def poll(cls, context):
@@ -300,6 +304,10 @@ class PG_PT_smash_texture_materials(Panel):
     bl_region_type = 'WINDOW'
     bl_context = 'material'
     bl_options = {'DEFAULT_CLOSED'}
+
+    def draw_header_preset(self, context):
+        from ...ui_help import draw_panel_help
+        draw_panel_help(self.layout, self)
     
     @classmethod
     def poll(cls, context):

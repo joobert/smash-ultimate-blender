@@ -74,6 +74,7 @@ detection rules, frame conventions, and backup behavior.
 **Exporter**:
 
 - Export the current action, or batch export from a matching multi-select checkbox list. The batch button shows the selected count
+- Export runs synchronously and restores the active actions, action slots, current frame/subframe, and auto-key setting after success or failure. Batch clips without SAP data no longer inherit the previous clip's SAP action
 - **Export Raw Animation** and **Include Raw with .NUANMB Export** live in the **Raw Animations** panel, not here
 - Bone override list, populate-from-armature, **Thrown** preset
 - Bones named `BL_*` are skipped on anim (and model) export so helper controls never ship in-game
@@ -100,6 +101,7 @@ and inspect the imported motion before further editing or game export.
 - In add-on preferences, **Model Workflow Folders** sets the default vanilla `.nusktb` browser folder and model export destination
 - **Add Model Folder** maps an imported model's source directory to its export directory. A matching model destination overrides the global default; the export browser still lets you choose another location
 - Model discovery follows symlinks and Windows junctions, including linked mod directories
+- Remembered animation folders belong to each armature and are saved in the `.blend`. Selecting an armature or one of its skinned meshes restores that model's folder list and active folder; missing folders remain recorded, and costume-specific imports do not silently fall back to another costume
 - Model export defaults to **Order Only**: preserve vanilla bone order while using Blender's bone transforms. Choose **Order & Values** to retain vanilla transforms too. Without a selected vanilla skeleton, the export dialog uses **No Link**
 
 Setup details: [Model workflow folders](docs/model-workflow-folders.md).
@@ -129,6 +131,7 @@ Setup details: [Model workflow folders](docs/model-workflow-folders.md).
 - **Idle Pose Library** — predefined poses come from the active animation folder and refresh when it changes. Applying reads the source clip on demand; custom stored poses remain available across folder changes. Options include Trans, mirrored, and 180 rotate
 - **User Poses** — **Save Pose**, **Remove Pose**, and **Apply to Current Frame**, with an option to affect only selected bones
 - **IK Tools** — create arm/leg IK, bake & remove IK/FK, toggle influence, **Bulk IK** on every loaded animation
+- **Live Floor Contact** — calibrate heel/toe or palm/finger points, keep them above a world-Z floor, plant limbs manually or at editable markers, and optionally align rotation or adjust `Trans` height. The constraint/driver setup is live and non-destructive; calibration can be saved in Armature Collection Presets. See [Live IK floor contact](docs/ik-floor-contact.md)
 - **Reverse-foot controls** — leg IK includes a toe-base `FootRollIK` pivot and a separate `ToeIK` rotation control. Enable **Pin Toe** under Live Floor Contact to hold that calibrated toe pivot while rolling the heel/backfoot; the toe control follows the existing IK/FK blend
 - **Mirror Animation** — space, Smash Y Anim Flip, custom extra bones, **Mirror All Loaded Animations**. Newly imported actions rebuild their Smash pose cache from the source `.nuanmb` when first needed; if the source has moved, mirroring falls back to the armature-derived pose path
 - **Misc Anim Stuff** (collapsible) — Transfer Hip Animation to Trans, Reset Bone Locations, Ground Character, Invert Positive and Negative, Remove Animation from Swing Bones, **GIF or Photo** (also on the Action Editor header)
@@ -142,6 +145,8 @@ IK and FK have independent animation channels, with keyed mode values that blend
 - Creating limbs matches the current FK pose, keys IK mode at the current frame, and enables the new controls immediately. Accept the optional match dialog to copy the full FK animation into IK; FK transform keys remain intact
 - **Match IK to Current Animation** appears for unmatched actions or limbs. It samples the scene frame range and writes IK controls from the FK source; use it to refresh IK after editing FK. Switching modes alone does not rematch or overwrite edited controls
 - **IK Stretch Arms / Legs** is off by default. Hands and feet stay at their solved position when a target is out of reach; enable stretch to let the endpoint follow the target. The stretch buttons insert stepped state keys even when auto-key is off
+- **Stretch Chain** distributes an enabled stretch offset progressively across the complete parent chain without adding scale. The root remains anchored. Each arm chain also has an independent, keyframable **ArmIK Pull** influence that draws its bend bone toward the hand target while full-chain stretch is active
+- **Custom IK Bones** accepts a setup name plus a root, bend bone, and endpoint on one parent path. Custom chains cannot overlap another IK setup; they use the chosen Arms or Legs switch and participate in matching and Bake & Remove IK. Save or load their definitions as JSON presets from the same section
 - Targets and poles have no parent, so they do not inherit `Trans` motion. Existing independent rigs receive endpoint constraint and driver repairs on load
 - **Position IK Controls** evaluates independent limbs together, including Entire Animation, while retaining sequential matching for custom dependencies. Pose-tool refresh waits until matching finishes; solver precision and frame sampling are retained
 - **Bake & Remove IK** takes a limb selection (all present IK, legs only, arms only, arms and legs), samples the evaluated motion before removing controls, and leaves unrelated limb channels alone

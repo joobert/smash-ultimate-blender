@@ -348,8 +348,15 @@ classes = [
     source.model.material.shader_nodes.custom_sprite_sheet_params_node.SUB_CSN_ultimate_sprite_sheet_params,
 ]
 
+
+def _draw_panel_help_header(self, context):
+    from .ui_help import draw_panel_help
+    draw_panel_help(self.layout, self)
+
 def register():
     for cls in classes:
+        if issubclass(cls, bpy.types.Panel) and not hasattr(cls, 'draw_header_preset'):
+            cls.draw_header_preset = _draw_panel_help_header
         try:
             bpy.utils.register_class(cls)
         except (ValueError, RuntimeError):

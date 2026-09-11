@@ -50,6 +50,32 @@ def has_finger_controls(armature_obj):
     return finger_sliders.has_finger_sliders(armature_obj)
 
 
+def _draw_ik_stretch_rows(layout, arm, has_arms=None, has_legs=None):
+    if arm is None or not arm.data.get('sub_independent_ik'):
+        return
+    has_arms = armature_has_ik(arm, 'ARMS') if has_arms is None else has_arms
+    has_legs = armature_has_ik(arm, 'LEGS') if has_legs is None else has_legs
+    if has_arms:
+        row = layout.row(align=True)
+        row.operator('sub.key_ik_stretch', text='IK Stretch Arms',
+                     depress=arm.data.sub_ik_stretch_arms).limbs = 'ARMS'
+        row.prop(arm.data, 'sub_ik_stretch_chain_arms', text='Stretch Chain')
+        from .ik_channels import ARM_PULL_PROPERTY, chains
+        for _kind, _names, _target, pole_name in chains(arm, 'ARMS'):
+            pole = arm.pose.bones.get(pole_name)
+            if pole is None:
+                continue
+            pull_row = layout.row(align=True)
+            pull_row.enabled = (
+                arm.data.sub_ik_stretch_arms and arm.data.sub_ik_stretch_chain_arms)
+            pull_row.prop(pole.bone, ARM_PULL_PROPERTY, text=f'{pole_name} Pull', slider=True)
+    if has_legs:
+        row = layout.row(align=True)
+        row.operator('sub.key_ik_stretch', text='IK Stretch Legs',
+                     depress=arm.data.sub_ik_stretch_legs).limbs = 'LEGS'
+        row.prop(arm.data, 'sub_ik_stretch_chain_legs', text='Stretch Chain')
+
+
 def _draw_ik_fk_switch_rows(layout, arm):
     """Shared Arms/Legs/Both IK↔FK switches (Animation Rig + IK Tools)."""
     if arm is None or not armature_has_ik(arm):
@@ -87,14 +113,7 @@ def _draw_ik_fk_switch_rows(layout, arm):
         op.limbs = kind
         op.set_enabled = True
         op.enable_ik = enable_ik
-    if arm.data.get('sub_independent_ik'):
-        row = layout.row(align=True)
-        if has_arms:
-            row.operator('sub.key_ik_stretch', text='IK Stretch Arms',
-                         depress=arm.data.sub_ik_stretch_arms).limbs = 'ARMS'
-        if has_legs:
-            row.operator('sub.key_ik_stretch', text='IK Stretch Legs',
-                         depress=arm.data.sub_ik_stretch_legs).limbs = 'LEGS'
+    _draw_ik_stretch_rows(layout, arm, has_arms, has_legs)
     if animation_needs_ik_match(arm):
         row = layout.row(align=True)
         row.operator(
