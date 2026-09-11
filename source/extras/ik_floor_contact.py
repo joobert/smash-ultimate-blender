@@ -115,6 +115,7 @@ class SUB_PG_floor_limb(PropertyGroup):
 
 class SUB_PG_floor_contact(PropertyGroup):
     enabled: BoolProperty(name='Floor Contact', default=True, update=_changed)
+    advanced: BoolProperty(name='Advanced', default=False, options=set())
     calibrating: BoolProperty(name='Calibrating', default=False, update=_changed)
     adjust_body: BoolProperty(name='Adjust Body Height', default=False, update=_changed,
                              description='Allow vertical Trans correction to reach planted feet with stretch disabled')
@@ -241,6 +242,8 @@ def configure(scene, arm, limb):
     drive(lock, 'influence', 'on*en*(1-cal)*pin*lock', {'lock': (arm, path + '.lock_rotation')})
 
 
+    # Vertical clearance always protects both samples, including when the toe
+    # is pinned and a backward rock puts the heel below it.
     # A stable local reference for horizontal contact: lowest point for rolling,
     # midpoint for a rigid plant. No stateful "previous frame" accumulator.
     for name, expression in (
@@ -252,7 +255,7 @@ def configure(scene, arm, limb):
         ('attachment', 'max(0,min(1,(rh-max(0,d))/max(s,0.000001),(rd-sqrt((px-ax)**2+(py-ay)**2))/max(s,0.000001))) if auto else 0'),
         ('ease', 'attachment*attachment*(3-2*attachment)'),
         ('weight', '1 if pin or toe_pin else max(ease,friction*max(0,1-max(0,d)/max(rh,0.000001)))'),
-        ('height', 'z-(tz if toe_pin else min(hz,tz))+floor+(0 if pin or toe_pin or d<=0 else (1-ease)*(d*d/s*(2-d/s) if s>0 and d<s else d))'),
+        ('height', 'z-min(hz,tz)+floor+(0 if pin or toe_pin or d<=0 else (1-ease)*(d*d/s*(2-d/s) if s>0 and d<s else d))'),
     ):
         limb.solved[name] = 0.0
         drive(limb.solved, '["' + name + '"]', expression)
@@ -614,6 +617,7 @@ class SUB_OP_floor_contact(Operator):
                     if self.action == 'PLANT':
                         limb.planted = True
                 elif self.action == 'RELEASE':
+                    limb.pin_toe = False
                     limb.planted = False
                     limb.auto_plant = False
                 elif self.action == 'SELECT':
@@ -636,78 +640,68 @@ class SUB_OP_floor_contact(Operator):
 def draw(layout, context, arm):
     if arm is None or not hasattr(arm, 'sub_floor_contact'):
         return
-    box = layout.box()
-    box.label(text='Live Floor Contact', icon='CON_FLOOR')
     props = arm.sub_floor_contact
+    box = layout.box()
+    row = box.row(align=True)
+    row.label(text='Live Floor Contact', icon='CON_FLOOR')
     if not props.limbs:
         box.operator('sub.floor_contact', text='Set Up Floor Contact').action = 'SETUP'
-        box.label(text='Calibrate the sole / palm once per model.')
         return
-    box.prop(props, 'enabled')
+    row.prop(props, 'enabled', text='')
     box.prop(context.scene, 'sub_floor_height')
+    if props.calibrating:
+        box.label(text='Pose soles flat and edit contact markers.', icon='INFO')
+        box.operator('sub.floor_contact', text='Finish Calibration').action = 'FINISH'
+    for limb in props.limbs:
+        row = box.row(align=True)
+        row.prop(limb, 'enabled', text=limb.control)
+        actions = row.row(align=True)
+        actions.enabled = props.enabled and limb.enabled and not props.calibrating
+        held = limb.planted or limb.pin_toe or limb.auto_plant
+        action, label = ('RELEASE', 'Release') if held else ('PLANT', 'Plant')
+        op = actions.operator('sub.floor_contact', text=label, depress=held)
+        op.action, op.control = action, limb.control
+        if props.calibrating:
+            row = box.row(align=True)
+            for action, label in (('SELECT', 'Edit Markers'), ('MIRROR', 'Mirror')):
+                op = row.operator('sub.floor_contact', text=label)
+                op.action, op.control = action, limb.control
+    row = box.row()
+    row.prop(props, 'advanced', icon='TRIA_DOWN' if props.advanced else 'TRIA_RIGHT', emboss=False)
+    if not props.advanced:
+        return
     box.prop(props, 'show_markers')
     if props.body_target:
         box.prop(props, 'adjust_body')
     else:
         box.operator('sub.floor_contact', text='Set Up Body Height Adjustment').action = 'BODY'
-    if props.calibrating:
-        box.label(text='Calibration: floor correction is temporarily paused.')
-        box.label(text='Pose soles flat; move markers to the mesh bottom.')
-        box.operator('sub.floor_contact', text='Finish Calibration').action = 'FINISH'
     for limb in props.limbs:
         col = box.box()
         row = col.row(align=True)
         row.prop(limb, 'expanded', text='', icon='TRIA_DOWN' if limb.expanded else 'TRIA_RIGHT', emboss=False)
         row.label(text=limb.control)
-        row.prop(limb, 'enabled')
         if not limb.expanded:
             continue
-        if props.enabled and limb.enabled and not props.calibrating and limb.solved:
-            from . import ik_channels
-            for kind, names, control, _ in ik_channels.chains(arm):
-                if control != limb.control:
-                    continue
-                graph = context.evaluated_depsgraph_get()
-                evaluated = arm.evaluated_get(graph)
-                end = evaluated.pose.bones.get(ik_channels.PREFIX + names[2])
-                if end and getattr(arm.data, 'sub_use_ik_' + kind.lower(), 1) > .001:
-                    actual = (evaluated.matrix_world @ end.matrix).translation
-                    target = limb.solved.evaluated_get(graph).matrix_world.translation
-                    if (actual - target).length > max(.001, end.length * .01):
-                        col.label(text='Contact target is outside the solved limb’s reach.', icon='INFO')
-                break
-        col.prop(limb, 'softness')
-        row = col.row(align=True)
-        for action, label in (('PLANT', 'Plant Now'), ('RELEASE', 'Release')):
-            op = row.operator('sub.floor_contact', text=label)
-            op.action, op.control = action, limb.control
         col.prop(limb, 'planted')
+        col.prop(limb, 'softness')
         col.prop(limb, 'auto_plant')
         if limb.auto_plant:
-            col.label(text='Uses this limb’s editable plant marker.')
             col.prop(limb, 'release_height')
             col.prop(limb, 'release_distance')
             op = col.operator('sub.floor_contact', text='Move Plant Marker Here')
             op.action, op.control = 'CAPTURE', limb.control
         col.prop(limb, 'resistance')
-        row = col.row(align=True)
-        row.prop(limb, 'align')
-        row.prop(limb, 'lock_rotation')
+        col.prop(limb, 'align')
+        col.prop(limb, 'lock_rotation')
         if limb.kind == 'LEGS':
-            col.prop(limb, 'rolling')
+            col.prop(limb, 'rolling', text='Follow Heel / Toe Contact')
             col.prop(limb, 'pin_toe')
-            if limb.pin_toe:
-                suffix = limb.control[6:] if limb.control.startswith('FootIK') else ''
-                col.label(text='Rotate FootRollIK' + suffix + ' to roll from the toe.')
-        row = col.row(align=True)
-        for action, label in (('SELECT', 'Edit Contact Markers'), ('MIRROR', 'Mirror Calibration')):
-            op = row.operator('sub.floor_contact', text=label)
-            op.action, op.control = action, limb.control
-    box.label(text='Save calibration with an Armature Collection Preset.')
-    if not props.adjust_body or not props.body_target:
-        box.label(text='Body motion is preserved; unreachable targets may leave a gap.')
-    else:
-        box.label(text='Body height assists reach; horizontal reach is still limited.')
+        if not props.calibrating:
+            row = col.row(align=True)
+            for action, label in (('SELECT', 'Edit Markers'), ('MIRROR', 'Mirror')):
+                op = row.operator('sub.floor_contact', text=label)
+                op.action, op.control = action, limb.control
+    box.label(text='Save calibration in an Armature Collection Preset.')
     box.operator('sub.floor_contact', text='Remove Floor Contact').action = 'REMOVE'
 
 
@@ -722,6 +716,13 @@ def _restore_contacts():
                 fc.mute = False
         if obj.type == 'ARMATURE' and obj.sub_floor_contact.limbs:
             for limb in obj.sub_floor_contact.limbs:
+                # Repair saved drivers as well as newly configured contact rigs.
+                if limb.solved and limb.solved.animation_data:
+                    for fc in limb.solved.animation_data.drivers:
+                        if fc.data_path == '["height"]':
+                            fc.driver.expression = fc.driver.expression.replace(
+                                'z-(tz if toe_pin else min(hz,tz))+floor',
+                                'z-min(hz,tz)+floor')
                 # Remove the short-lived generated roll helper from files made
                 # by the previous implementation and restore the direct path.
                 old = bpy.data.objects.get(obj.name + ' • ' + limb.control + ' Foot Roll')

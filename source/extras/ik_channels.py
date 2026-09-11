@@ -27,7 +27,7 @@ ARM_PULL_PROPERTY = 'sub_ik_arm_pull'
 
 
 def connected_toe_bones(obj, names):
-    """Connected toe hierarchy for a leg, rooted at ToeL/ToeR case-insensitively."""
+    """Parented toe hierarchy; Smash joints need not use Blender Connected."""
     foot = names[-1]
     if not foot.startswith('Foot'):
         return ()
@@ -39,8 +39,6 @@ def connected_toe_bones(obj, names):
     pending = list(root.children)
     while pending:
         bone = pending.pop(0)
-        if not bone.use_connect:
-            continue
         if 'toe' in bone.name.lower():
             result.append(bone.name)
         pending.extend(bone.children)
@@ -48,15 +46,19 @@ def connected_toe_bones(obj, names):
 
 
 def toe_pivot_name(obj, names):
-    """Choose the anatomical toe-base pivot without depending on exact casing."""
+    """Ground the deepest toe descendant, with a stable name tie-break for branches."""
     toe_names = connected_toe_bones(obj, names)
     if not toe_names:
         return None
-    for name in toe_names[1:]:
-        normalized = re.sub(r'[^a-z0-9]', '', name.lower())
-        if 'basetoe' in normalized or 'toebase' in normalized:
-            return name
-    return toe_names[0]
+    root = obj.data.bones[toe_names[0]]
+
+    def depth(name):
+        bone, count = obj.data.bones[name], 0
+        while bone != root:
+            bone, count = bone.parent, count + 1
+        return count
+
+    return min(toe_names, key=lambda name: (-depth(name), name.lower(), name))
 
 
 def foot_controls(names, obj=None):
@@ -69,6 +71,15 @@ def foot_controls(names, obj=None):
     if obj is not None:
         toe_name = toe_pivot_name(obj, names) or toe_name
     return 'FootRollIK' + suffix, 'ToeIK' + suffix, PREFIX + 'FootTarget' + suffix, toe_name
+
+
+def toe_articulation(obj, names):
+    """Independent proximal toe bend for a multi-joint toe chain."""
+    toes = connected_toe_bones(obj, names)
+    if not toes or toes[0] == toe_pivot_name(obj, names):
+        return None
+    suffix = names[-1][4:]
+    return 'ToeBendIK' + suffix, PREFIX + 'ToeBasis' + suffix, toes[0]
 
 
 def endpoint_target(obj, names, fallback):
@@ -293,10 +304,11 @@ def outputs(obj, limbs='BOTH'):
 def toe_outputs(obj, limbs='BOTH'):
     for kind, names, _target, _pole in chains(obj, limbs):
         controls = foot_controls(names, obj) if kind == 'LEGS' else None
-        toe = obj.pose.bones.get(controls[3]) if controls else None
-        con = toe.constraints.get(TOE_OUTPUT) if toe else None
-        if con:
-            yield toe, con, kind
+        for name in connected_toe_bones(obj, names) if controls else ():
+            toe = obj.pose.bones[name]
+            con = toe.constraints.get(TOE_OUTPUT)
+            if con:
+                yield toe, con, kind
 
 
 def ensure(obj, context, limbs='BOTH'):
@@ -309,8 +321,17 @@ def ensure(obj, context, limbs='BOTH'):
                     if j[0] == 'LEGS' and foot_controls(j[1], obj)
                     and foot_controls(j[1], obj)[3] in obj.data.bones]
     missing_reverse = [j for j in reverse_feet
-                       if any(n not in obj.data.bones for n in foot_controls(j[1], obj)[:3])]
-    if fresh or missing_reverse:
+                       if any(n not in obj.data.bones for n in foot_controls(j[1], obj)[:3])
+                       or (toe_articulation(obj, j[1]) and any(n not in obj.data.bones for n in toe_articulation(obj, j[1])[:2]))
+                       or any(pb.constraints.get(TOE_OUTPUT) and pb.name != foot_controls(j[1], obj)[3]
+                              and not (toe_articulation(obj, j[1]) and pb.name == toe_articulation(obj, j[1])[2])
+                              for pb in (obj.pose.bones[n] for n in connected_toe_bones(obj, j[1])))]
+    misplaced_reverse = [j for j in reverse_feet if j not in missing_reverse
+                         and not obj.data.bones[foot_controls(j[1], obj)[0]].get('sub_foot_pivot_space')]
+    stale_articulation = [j for j in reverse_feet if toe_articulation(obj, j[1])
+                          and (not obj.pose.bones[toe_articulation(obj, j[1])[2]].constraints.get(TOE_OUTPUT)
+                               or obj.pose.bones[toe_articulation(obj, j[1])[2]].constraints[TOE_OUTPUT].subtarget != toe_articulation(obj, j[1])[1])]
+    if fresh or missing_reverse or misplaced_reverse or stale_articulation:
         # Heal the old rest-hold workaround once, before installing independent chains.
         rig._clear_fk_rest_hold(obj)
         rig.unmute_all_ik_fk_fcurves(obj)
@@ -344,7 +365,11 @@ def ensure(obj, context, limbs='BOTH'):
             toe = bones[original_toe]
             roll = bones.get(roll_name) or bones.new(roll_name)
             roll_length = max(foot.length * .45, .1)
-            roll.head = toe.head
+            # Matching gives FootIK the FK foot's pose matrix, even when their
+            # rest axes differ. Express the hinge in that same foot space.
+            foot_space = foot.matrix @ bones[names[-1]].matrix.inverted_safe()
+            roll.head = foot_space @ toe.head
+            roll['sub_foot_pivot_space'] = 1
             roll.tail = roll.head + foot.vector.normalized() * roll_length
             roll.roll = foot.roll
             toe_control = bones.get(toe_name) or bones.new(toe_name)
@@ -356,6 +381,29 @@ def ensure(obj, context, limbs='BOTH'):
                 bone.parent = parent
                 bone.use_connect = False
                 bone.use_deform = False
+            articulation = toe_articulation(obj, names)
+            if articulation:
+                bend_name_, basis_name, root_toe = articulation
+                bend = bones.get(bend_name_) or bones.new(bend_name_)
+                bend.head = foot_space @ bones[root_toe].head
+                bend.tail = bend.head + foot.vector.normalized() * roll_length
+                bend.roll = foot.roll
+                bend.parent, bend.use_connect, bend.use_deform = roll, False, False
+                basis = bones.get(basis_name) or bones.new(basis_name)
+                basis.matrix = foot_space @ bones[root_toe].matrix
+                basis.length = bones[root_toe].length
+                basis.parent, basis.use_connect, basis.use_deform = roll, False, False
+                output.parent = bend
+        for _kind, names, target, _pole in misplaced_reverse:
+            roll_name, _toe_name, output_name, original_toe = foot_controls(names, obj)
+            roll = bones[roll_name]
+            output_matrix = bones[output_name].matrix.copy()
+            delta = (bones[target].matrix @ bones[names[-1]].matrix.inverted_safe()
+                     @ bones[original_toe].head) - roll.head
+            # Keep axes and keyed channels; repair only the hinge's rest offset.
+            roll.translate(delta)
+            bones[output_name].matrix = output_matrix
+            roll['sub_foot_pivot_space'] = 1
         bpy.ops.object.mode_set(mode='POSE')
         collection = obj.data.collections.get('IK Internal') or obj.data.collections.new('IK Internal')
         collection.is_visible = False
@@ -411,6 +459,13 @@ def ensure(obj, context, limbs='BOTH'):
                 pb.rotation_mode = 'XYZ'
                 pb.lock_location = (True, True, True)
                 pb.lock_scale = (True, True, True)
+            articulation = toe_articulation(obj, names)
+            for name in connected_toe_bones(obj, names):
+                pb = obj.pose.bones[name]
+                old = pb.constraints.get(TOE_OUTPUT)
+                if old and name != original_toe and not (articulation and name == articulation[2]):
+                    old.driver_remove('influence')
+                    pb.constraints.remove(old)
             toe = obj.pose.bones.get(original_toe)
             if toe:
                 con = toe.constraints.get(TOE_OUTPUT) or toe.constraints.new('COPY_ROTATION')
@@ -418,6 +473,19 @@ def ensure(obj, context, limbs='BOTH'):
                 con.owner_space = con.target_space = 'WORLD'
                 from .create_animation_rig import _ensure_constraint_influence_driver
                 _ensure_constraint_influence_driver(obj, toe, con, 'sub_use_ik_legs')
+            if articulation:
+                bend_name_, basis_name, root_toe = articulation
+                bend = obj.pose.bones[bend_name_]
+                bend.rotation_mode = 'XYZ'
+                bend.lock_location = bend.lock_scale = (True, True, True)
+                controls_collection.assign(bend.bone)
+                bend.bone.color.palette = 'THEME09'
+                collection.assign(obj.data.bones[basis_name])
+                root = obj.pose.bones[root_toe]
+                con = root.constraints.get(TOE_OUTPUT) or root.constraints.new('COPY_ROTATION')
+                con.name, con.target, con.subtarget = TOE_OUTPUT, obj, basis_name
+                con.owner_space = con.target_space = 'WORLD'
+                _ensure_constraint_influence_driver(obj, root, con, 'sub_use_ik_legs')
             mid = solve_bone(obj, names)
             solve = mid.constraints.get('SUB IK Solve')
             if solve and solve.target == obj:
@@ -674,6 +742,9 @@ def clean_animation(obj, limbs='BOTH', tolerance=1e-4):
         controls = foot_controls(group, obj)
         if controls:
             names.update(controls[:3])
+            articulation = toe_articulation(obj, group)
+            if articulation:
+                names.update(articulation[:2])
     paths = {obj.pose.bones[n].path_from_id() for n in names if n in obj.pose.bones}
     allowed = {path + '.' + channel for path in paths for channel in
                ('location', 'rotation_euler', 'rotation_quaternion', 'rotation_axis_angle', 'scale')}
@@ -852,6 +923,7 @@ def _chain_cache(obj, jobs):
             'parent': parent.name if parent is not None else None,
             'angle': None,
             'foot': foot_controls(names, obj),
+            'articulation': toe_articulation(obj, names),
         }
     return cache
 
@@ -864,6 +936,8 @@ def _sample_names(obj, jobs, cache):
         names.extend(entry['path'])
         if entry['foot'] and entry['foot'][3] in obj.pose.bones:
             names.append(entry['foot'][3])
+        if entry['articulation']:
+            names.append(entry['articulation'][2])
         if entry['parent']:
             names.append(entry['parent'])
     return list(dict.fromkeys(names))
@@ -933,6 +1007,19 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
         toe_pb = obj.pose.bones[foot[1]]
         if not pose_math.apply_world(toe_pb, matrices[foot[3]], matrices[path[-1]]):
             toe_pb.matrix = matrices[foot[3]]
+            yield
+
+    articulation = entry.get('articulation')
+    if articulation:
+        bend_name_, basis_name, root_toe = articulation
+        obj.pose.bones[bend_name_].matrix_basis = Matrix.Identity(4)
+        # Match in the known neutral-roll frame rather than reading a stale
+        # evaluated parent during per-chain matching.
+        roll_world = matrices[path[-1]] @ pose_math.offset_matrix(obj.data.bones[foot[0]])
+        basis_pb = obj.pose.bones[basis_name]
+        if not pose_math.apply_world(basis_pb, matrices[root_toe], roll_world):
+            yield
+            basis_pb.matrix = matrices[root_toe]
             yield
 
     pole_pb = obj.pose.bones[pole]
@@ -1030,6 +1117,9 @@ def _match_chain_steps(obj, job, matrices, frame, key, writer, entry, previous_p
         if foot and all(name in obj.pose.bones for name in foot[:2]):
             writer.stash_pose_bone(obj.pose.bones[foot[0]], frame)
             writer.stash_pose_bone(obj.pose.bones[foot[1]], frame)
+        if articulation:
+            for name in articulation[:2]:
+                writer.stash_pose_bone(obj.pose.bones[name], frame)
         writer.stash_channel(con.path_from_id() + '.pole_angle', 0, frame,
                              con.pole_angle, solver[-2].name)
 
@@ -1077,6 +1167,7 @@ def match(context, obj, limbs='BOTH', entire=True, key=True, clean=False, _batch
             if key and obj.animation_data and obj.animation_data.action:
                 owned = {PREFIX+n for _, _, target, _ in jobs for n in cache[target]['path']} | {n for _, _, target, pole in jobs for n in (target, pole)}
                 owned.update(name for entry in cache.values() if entry['foot'] for name in entry['foot'][:3])
+                owned.update(name for entry in cache.values() if entry['articulation'] for name in entry['articulation'][:2])
                 paths = tuple(obj.pose.bones[n].path_from_id() + '.' for n in owned if n in obj.pose.bones)
                 for fc in get_all_action_fcurves(obj.animation_data.action, id_type='OBJECT'):
                     if fc.data_path.startswith(paths):
@@ -1213,11 +1304,15 @@ def remove(context, obj, limbs='BOTH'):
         controls = foot_controls(group, obj) if kind == 'LEGS' else None
         if controls:
             names.update(controls[:3])
-            toe = obj.pose.bones.get(controls[3])
-            con = toe.constraints.get(TOE_OUTPUT) if toe else None
-            if con:
-                con.driver_remove('influence')
-                toe.constraints.remove(con)
+            articulation = toe_articulation(obj, group)
+            if articulation:
+                names.update(articulation[:2])
+            for name in connected_toe_bones(obj, group):
+                toe = obj.pose.bones[name]
+                con = toe.constraints.get(TOE_OUTPUT)
+                if con:
+                    con.driver_remove('influence')
+                    toe.constraints.remove(con)
     for pb, con, _ in list(outputs(obj, limbs)):
         con.driver_remove('influence')
         pb.constraints.remove(con)

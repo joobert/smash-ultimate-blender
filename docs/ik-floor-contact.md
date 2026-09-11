@@ -1,6 +1,10 @@
 # Live IK floor contact
 
 Find **Live Floor Contact** inside **Ultimate → Animation Tools → IK Tools**.
+The compact view shows enable, floor height, and Plant/Release per limb.
+Expand **Advanced** for tuning, body assistance, markers, and removal.
+Calibration exposes marker editing and mirroring directly.
+
 Create the usual IK controls first. Contact is evaluated by Blender constraints
 and drivers while posing, playing, and scrubbing. It does not bake poses, add
 keys to the current action, or change the IK stretch switches.
@@ -8,10 +12,9 @@ keys to the current action, or change the IK stretch switches.
 ## Calibrate a model
 
 1. Choose **Set Up Floor Contact**. Correction pauses during calibration.
-2. Pose the feet flat. Expand a foot's settings and choose **Edit Contact
-   Markers**. Move its Heel and Toe markers onto the bottom of the mesh. These
+2. Pose the feet flat. Choose **Edit Markers** for that foot. Move its Heel and Toe markers onto the bottom of the mesh. These
    are contact samples, not an automatic mesh collision calculation.
-3. Choose **Mirror Calibration** to copy those offsets across the armature's
+3. Choose **Mirror** to copy those offsets across the armature's
    local X axis. Mirroring uses rest geometry, so an asymmetric current pose
    does not change the saved opposite-side offsets.
 4. Choose **Finish Calibration**. This records the flat orientation, captures
@@ -26,10 +29,12 @@ feet load with contact on. Calibrate hands flat against the floor before using
 their optional orientation alignment. Body height, plant locations, scene
 floor height, and animation-specific planting choices are not model calibration.
 
-Toe discovery is case-insensitive. A connected descendant whose name contains
-`BaseToe` or `ToeBase` (for example `BaseToeR`) is preferred over the `ToeR`
-root as the reverse-foot pivot and initial Toe marker. Other connected bones
-containing `Toe` remain part of the leg's IK/FK animation handling.
+Toe discovery is case-insensitive and follows descendants of `ToeL`/`ToeR`
+regardless of Blender's **Connected** flag. The deepest descendant containing
+`Toe` in its name becomes the grounded pivot. Thus `ToeL → BaseToeL` grounds
+`BaseToeL`; a longer chain grounds its last toe bone. Earlier segments move
+with the foot around that final joint. For equal-depth branches, a stable name
+order chooses one pivot; this is not a solver that pins multiple separate toes.
 
 ## Pose and plant
 
@@ -40,8 +45,9 @@ containing `Toe` remain part of the leg's IK/FK animation handling.
 - **Contact Softness** sets the height of the gentle approach zone. Zero gives
   a hard boundary. Above the zone, the target is unchanged. Softness never
   permits the calibrated points to penetrate the floor.
-- **Plant Now** captures this limb's current location and holds its contact
-  against the floor. **Release** restores sliding and lifting. The **Planted**
+- **Plant** captures this limb's current location and holds its contact
+  against the floor. **Release** clears manual planting, toe pinning, and automatic planting to
+  restore sliding and lifting. The **Planted**
   property can also be keyframed. Plant markers are editable/keyframeable
   objects; use **Show Contact Markers** to expose them.
 - **Auto Plant at Marker** attaches near that limb's saved plant marker and
@@ -53,9 +59,47 @@ containing `Toe` remain part of the leg's IK/FK animation handling.
   near the floor. It defaults to zero and does not accumulate simulated friction.
 - **Align to Floor** uses the orientation recorded during flat calibration,
   preserving heading. **Lock Planted Rotation** holds a manually planted
-  limb's rotation. **Heel / Toe Roll** uses the lower contact point as the
+  limb's rotation. **Follow Heel / Toe Contact** uses the lower contact point as the
   pivot; otherwise, horizontal planting uses the midpoint. Your rotation drives
   the roll; the assistant does not generate foot animation.
+
+## Foot roll and toe curl
+
+To keep the toe still while lifting the heel, leave `FootIK` and `ToeIK` in
+place and rotate `FootRollIK`. It moves the ankle around the toe joint while
+the terminal toe keeps its position and orientation.
+Use `ToeIK` when you want to rotate the toe itself instead.
+
+Multi-joint feet also get `ToeBendIKL/R` at the first toe joint. Rotate it to
+bend the foot/ankle relative to that joint while keeping the toe chain still.
+For `FootL -> ToeL -> BaseToeL`, `FootRollIKL` lifts the heel around `BaseToeL`;
+`ToeBendIKL` adds articulation between `FootL` and `ToeL`. The controls combine,
+and zero toe bend keeps the existing heel lift. `ToeIKL` still rotates the
+terminal toe itself. A foot with just one toe bone gets no extra bend control.
+
+The bend control is rotation-only and belongs to the IK Bones collection.
+Fresh IK and matching install it; matching keys its neutral pose along with an
+internal toe-orientation seed. Bake & Remove preserves the resulting deform
+bone poses and removes both generated bones.
+
+This motion does not require floor contact or **Pin Toe**. Floor correction
+can translate the whole foot; disable it when testing an exact stationary toe.
+The ankle target must be reachable, or leg stretch must be enabled. With
+stretch off, an unreachable ankle target can still cause toe drift.
+
+Reapply fresh IK to existing rigs to use the updated heel lift. Creation and
+matching correct the pivot space automatically, including when `FootIK` and
+the FK foot have different rest orientations. Existing nonzero roll poses can
+change when their pivot is corrected or moved to a terminal toe.
+
+**Pin Toe** holds the calibrated sample horizontally. If a backward rock puts
+the heel below the toe, floor correction rests the heel on the floor and lets
+the toe lift instead of forcing the heel underground. Contact markers affect
+floor correction, not the anatomical hinge location.
+
+The current rig has one anatomical roll hinge. A full heel/ball/toe-tip roll
+system would add distinct pivots, as described in Blender's
+[Rigify leg documentation](https://docs.blender.org/manual/en/latest/addons/rigging/rigify/rig_types/limbs.html).
 
 ## Stretch and body height
 
